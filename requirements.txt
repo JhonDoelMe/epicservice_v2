@@ -1,0 +1,52 @@
+# --- Основной фреймворк для Telegram-бота ---
+aiogram>=3.12.0
+
+# --- Работа с базой данных (PostgreSQL) ---
+SQLAlchemy>=2.0.43
+asyncpg>=0.30.0
+psycopg2-binary>=2.9.10
+
+# --- Работа с данными и файлами ---
+pandas>=2.3.2
+openpyxl>=3.1.5
+aiofiles>=24.1.0
+
+# --- Нечёткий поиск ---
+thefuzz>=0.22.1
+
+# --- Планировщик фоновых задач ---
+apscheduler>=3.10.4
+
+# --- Конфигурация и переменные окружения ---
+python-dotenv>=1.0.1
+
+# --- Базовые зависимости (можно без жёсткой фиксации, но для стабильности можно оставить) ---
+aiohttp>=3.10
+aiosignal>=1.4
+annotated-types>=0.7
+async-timeout>=4.0
+attrs>=25.3
+cachetools>=5.5
+certifi>=2025.7
+charset-normalizer>=3.4
+et_xmlfile>=2.0
+frozenlist>=1.7
+greenlet>=3.2
+idna>=3.10
+magic-filter>=1.0.12
+multidict>=6.6
+numpy>=2.2
+pydantic>=2.9
+pydantic_core>=2.21
+pyparsing>=3.2
+python-dateutil>=2.9
+pytz>=2025.2
+requests>=2.32
+six>=1.17
+StrEnum>=0.4
+typing_extensions>=4.14
+tzdata>=2025.2
+urllib3>=2.5
+yarl>=1.20
+loguru>=0.7
+xlrd>=2.0
