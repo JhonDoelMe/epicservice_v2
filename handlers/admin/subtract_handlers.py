@@ -32,8 +32,9 @@ import re
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 
-from aiogram import types, Dispatcher
+from aiogram import types, Dispatcher, F
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.filters import Command
 from dotenv import load_dotenv
 from sqlalchemy import and_, text
 
@@ -171,7 +172,6 @@ def _subtract_one(session, dept_id: str, article: str, qty: float) -> Tuple[floa
     Блокує рядок на час транзакції.
     """
     # Явний блок рядка. SQLAlchemy Core текстом, щоб не залежати від діалекту.
-    # Якщо у тебе PG — працює коректно.
     lock_sql = text(
         """
         SELECT id FROM products
@@ -225,7 +225,7 @@ async def cmd_subtract_start(message: types.Message):
         if DEPT_DEFAULT
         else "Відділ не задано (буде потрібен у рядках)."
     )
-    text = (
+    text_msg = (
         "📉 <b>Відняти зібране</b>\n"
         f"{dept_hint}\n\n"
         "Надішліть повідомлення з позиціями, кожна з нового рядка. Приклади:\n"
@@ -234,7 +234,7 @@ async def cmd_subtract_start(message: types.Message):
         "100:12345678, 5</code>\n\n"
         "Де 100 — код відділу (якщо потрібно вказати явно)."
     )
-    await message.answer(text, parse_mode="HTML", reply_markup=_kb_done())
+    await message.answer(text_msg, parse_mode="HTML", reply_markup=_kb_done())
 
 
 @require_kb
@@ -325,12 +325,10 @@ def register(dp: Dispatcher) -> None:
     Реєстрація хендлерів списання.
     Пропонується мати окрему команду/кнопку в адмінці, яка веде сюди.
     """
-    # Стартова команда, якщо хочеш окремо
-    dp.register_message_handler(cmd_subtract_start, commands=["subtract", "minus"])
-    # Будь-яке повідомлення після старту або в адмінському режимі можна ловити фільтром у твоїй логіці
-    # Тут реєструємо загальний обробник тексту як приклад:
-    dp.register_message_handler(
+    # Стартова команда
+    dp.message.register(cmd_subtract_start, Command("subtract", "minus"))
+    # Реєстрація основного обробника тексту з використанням regexp через magic-filter
+    dp.message.register(
         handle_subtract_payload,
-        content_types=[types.ContentType.TEXT],
-        regexp=r"^\s*(\d{8}|(\d{1,4}:\d{8}))\b.*,\s*[-+]?\d+([.,]\d+)?\s*$",
+        F.text.regexp(r"^\s*(\d{8}|(\d{1,4}:\d{8}))\b.*?,\s*[-+]?\d+([.,]\d+)?\s*$"),
     )
