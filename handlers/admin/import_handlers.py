@@ -50,7 +50,9 @@ from typing import Dict, List, Optional, Tuple
 
 import pandas as pd
 from aiogram import Bot, types, Dispatcher  # Dispatcher imported from aiogram root in v3
-from aiogram.dispatcher import filters
+# Removed import of `filters` from aiogram.dispatcher because in aiogram v3 filters module
+# is no longer available. We will use simple lambda functions for filtering callback data
+# instead of filters.Regexp.
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from dotenv import load_dotenv
 
@@ -501,5 +503,12 @@ def register(dp: Dispatcher) -> None:
         await _handle_import_file(message, dp.bot)
 
     # Підтвердження/скасування імпорту
-    dp.register_callback_query_handler(_cb_apply_import, filters.Regexp(regexp=r"^imp_apply:.+"))
-    dp.register_callback_query_handler(_cb_cancel_import, filters.Regexp(regexp=r"^imp_cancel:.+"))
+    # Filter callback queries by prefix using lambda since filters.Regexp is not available in aiogram v3
+    dp.register_callback_query_handler(
+        _cb_apply_import,
+        lambda cb: bool(cb.data) and cb.data.startswith("imp_apply:")
+    )
+    dp.register_callback_query_handler(
+        _cb_cancel_import,
+        lambda cb: bool(cb.data) and cb.data.startswith("imp_cancel:")
+    )
