@@ -127,16 +127,23 @@ async def update_quantity_selector(callback: CallbackQuery, bot: Bot):
             await callback.answer()
             return
 
-        await bot.edit_message_reply_markup(
-            chat_id=callback.message.chat.id,
-            message_id=callback.message.message_id,
-            reply_markup=get_quantity_selector_kb(product_id, new_qty, max_qty)
-        )
-        await callback.answer()
+        try:
+            await bot.edit_message_reply_markup(
+                chat_id=callback.message.chat.id,
+                message_id=callback.message.message_id,
+                reply_markup=get_quantity_selector_kb(product_id, new_qty, max_qty)
+            )
+        except TelegramBadRequest as e:
+            # Telegram повертає "Bad Request: message is not modified", якщо
+            # спробувати встановити такий самий reply_markup. Ігноруємо цю помилку.
+            if "message is not modified" not in str(e):
+                logger.warning("Помилка оновлення лічильника: %s", e)
+        except (ValueError, IndexError) as e:
+            logger.warning("Помилка оновлення лічильника: %s", e)
+        finally:
+            # У будь‑якому випадку відповідаємо на callback, щоб Telegram прибрав "годинничок"
+            await callback.answer()
 
-    except (ValueError, IndexError, TelegramBadRequest) as e:
-        logger.warning("Помилка оновлення лічильника: %s", e)
-        await callback.answer()
 
 
 @router.callback_query(F.data.startswith("add_confirm:"))
