@@ -1,5 +1,3 @@
-# epicservice/bot.py
-
 import asyncio
 import logging
 import sys
@@ -23,9 +21,7 @@ from handlers.user import (item_addition, list_editing, list_management,
                            list_saving, product_bridge)
 from middlewares.logging_middleware import LoggingMiddleware
 
-
 # Нове: імпортуємо хендлери карток/додавання з кешем
-# (вони не прив’язані до aiogram 2.x Dispatcher і їх можна реєструвати у Router 3.x)
 from handlers.user.card_handlers import open_product  # open:<dept>:<article>
 from handlers.user.add_handlers import add_fixed      # add:<dept>:<article>:N
 
@@ -97,8 +93,16 @@ async def main():
     # --- Реєстрація твоїх наявних роутерів (без змін) ---
     dp.include_router(error_handler.router)
     dp.include_router(admin_core.router)
-    dp.include_router(admin_import.router)
-    dp.include_router(admin_reports.router)
+
+    # --- Підключення адмінських модулів під aiogram 2.x ---
+    # Ці модулі не мають атрибута `router`, а натомість надають функцію `register(dp)`. Викликаємо її
+    # замість включення неіснуючого роутера.  Після переходу на aiogram 3.x ці функції можна буде
+    # замінити на dp.include_router(admin_import.router) та інші.
+    admin_import.register(dp)
+    admin_reports.register(dp)
+    admin_subtract.register(dp)
+
+    # Модулі, які вже мають роутери v3
     dp.include_router(admin_archive.router)
     dp.include_router(photo_admin.router)
     dp.include_router(common.router)

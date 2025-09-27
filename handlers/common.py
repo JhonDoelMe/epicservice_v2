@@ -1,12 +1,9 @@
-# epicservice/handlers/common.py
-
 import logging
 
 from aiogram import Bot, Router
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import CommandStart
 from aiogram.fsm.context import FSMContext
-# --- ЗМІНА: Додаємо імпорт ReplyKeyboardRemove ---
 from aiogram.types import Message, ReplyKeyboardRemove
 
 from config import ADMIN_IDS
@@ -52,7 +49,7 @@ async def cmd_start(message: Message, state: FSMContext, bot: Bot):
             first_name=user.first_name
         )
         logger.info("Обробка команди /start для користувача %s.", user.id)
-        
+
         if user.id in ADMIN_IDS:
             text = LEXICON.CMD_START_ADMIN
             kb = get_admin_main_kb()
@@ -60,17 +57,16 @@ async def cmd_start(message: Message, state: FSMContext, bot: Bot):
             text = LEXICON.CMD_START_USER
             kb = get_user_main_kb()
 
-        # --- ЗМІНА: Додаємо reply_markup=ReplyKeyboardRemove() ---
-        # Цей рядок гарантовано видалить будь-яку клавіатуру в полі вводу
+        # Надсилаємо повідомлення з новою клавіатурою.  Не передаємо два різних
+        # `reply_markup` параметри: замість того видаляємо попередню клавіатуру через
+        # clean_previous_keyboard(), а тут просто передаємо нову.
         sent_message = await message.answer(
-            text, 
-            reply_markup=kb, 
-            # Додаємо цей параметр для видалення старої клавіатури
-            reply_markup_remove=ReplyKeyboardRemove()
+            text,
+            reply_markup=kb
         )
-        
+
         await state.update_data(main_message_id=sent_message.message_id)
-            
+
     except Exception as e:
         logger.error("Неочікувана помилка в cmd_start для %s: %s", user.id, e, exc_info=True)
         await message.answer(LEXICON.UNEXPECTED_ERROR)
