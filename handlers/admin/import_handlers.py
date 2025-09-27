@@ -494,13 +494,19 @@ def register(dp: Dispatcher) -> None:
     - Callback кнопки підтвердження/скасування
     """
     # Прийом документів (будь-який чат), але фільтруємо по розширенню
-    @dp.message_handler(content_types=[types.ContentType.DOCUMENT])
     async def on_document(message: types.Message):
+        """
+        Handle incoming documents. If the document has an allowed extension, trigger a dry-run import.
+        Aiogram 3.x does not expose a ``message_handler`` decorator on ``Dispatcher``,
+        so we register the handler explicitly via ``dp.register_message_handler``.
+        """
         doc: types.Document = message.document
         name = (doc.file_name or "").lower()
         if not any(name.endswith(ext) for ext in ALLOWED_EXT):
-            return  # не наш формат
+            return  # not our format
         await _handle_import_file(message, dp.bot)
+    # Explicit registration of the message handler in aiogram v3
+    dp.register_message_handler(on_document, content_types=[types.ContentType.DOCUMENT])
 
     # Підтвердження/скасування імпорту
     # Filter callback queries by prefix using lambda since filters.Regexp is not available in aiogram v3
