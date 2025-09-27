@@ -1,12 +1,13 @@
-# -*- coding: utf-8 -*-
 """
-Доповнена версія модуля ``database.orm.products``.
+Modified version of database/orm/products.py to ensure that all required
+tables, including the ``users`` table from ``database.models``, are created when
+initialising the database schema.
 
-Цей файл містить SQLAlchemy‑моделі для ERP‑бота та додаткові ORM‑функції,
-які раніше були відсутні. Функції необхідні для роботи інших частин
-додатку, зокрема обробників та роутерів. Вони надають інтерфейси для
-пошуку, отримання та переліку товарів. Деякі функції залишені як
-заглушки для майбутньої реалізації.
+This file mirrors the original structure but imports the Base metadata from
+``database.models`` and invokes its ``create_all`` method within
+``ensure_schema``. This guarantees that the ``users`` table and other models
+defined in ``database/models.py`` are created alongside the product‑related
+tables defined here.
 """
 
 from __future__ import annotations
@@ -38,6 +39,14 @@ from sqlalchemy.orm import Session, declarative_base
 
 from database.engine import async_session, sync_session
 
+# Import the declarative base from database.models to include the User and other
+# shared models. Using this Base ensures that ``ensure_schema`` will create
+# tables defined in ``database/models.py`` as well as the ones defined below.
+from database.models import Base as ModelsBase
+
+# Local declarative base for product‑related tables. This remains separate
+# because the original code defines its own base. We'll still create its
+# tables in ``ensure_schema``.
 Base = declarative_base()
 
 
@@ -236,11 +245,20 @@ for cls in (Product, ProductCardCache, ProductPhoto, PicklistItem, PicklistOverf
 def ensure_schema(engine) -> None:
     """
     Створити таблиці, якщо їх немає. Викликати на старті застосунку.
+
+    Для сумісності з усіма моделями проєкту викликає ``create_all`` на
+    метаданих базових класів із ``database.models`` (які містять ``User`` та
+    інші таблиці), а потім на метаданих локального Base. Порядок виклику не
+    має значення, оскільки ``create_all`` є ідемпотентним.
+
     Приклад:
         from sqlalchemy import create_engine
         engine = create_engine(DB_URL, echo=False, future=True)
         ensure_schema(engine)
     """
+    # Спочатку створюємо таблиці, визначені у database.models.Base (наприклад, users)
+    ModelsBase.metadata.create_all(bind=engine)
+    # Потім створюємо таблиці, визначені у цьому модулі
     Base.metadata.create_all(bind=engine)
 
 
@@ -254,14 +272,14 @@ async def orm_find_products(
     """
     Виконує пошук товарів за артикулом або назвою.
 
-    Повертає список товарів, де `article` або `name` містять рядок
-    `search_query`. Якщо вказано `dept_id`, пошук обмежується заданим
+    Повертає список товарів, де ``article`` або ``name`` містять рядок
+    ``search_query``. Якщо вказано ``dept_id``, пошук обмежується заданим
     підрозділом. Нечіткий пошук може бути реалізований у майбутньому.
 
     :param search_query: Рядок для пошуку (артикул або частина назви).
     :param dept_id: (необов'язково) ідентифікатор підрозділу.
     :param limit: Максимальна кількість результатів.
-    :return: Список об'єктів `Product`.
+    :return: Список об'єктів ``Product``.
     """
     # Формуємо фільтр: порівнюємо article та name незалежно від регістру
     pattern = f"%{search_query}%"
@@ -285,13 +303,13 @@ async def orm_get_product_by_id(
     """
     Повертає товар за його ID.
 
-    Якщо `for_update=True`, рядок блокується для оновлення (SELECT ... FOR UPDATE).
+    Якщо ``for_update=True``, рядок блокується для оновлення (SELECT ... FOR UPDATE).
     Можна передати вже відкриту сесію для оптимізації; якщо ні — буде створена нова.
 
     :param product_id: ID товару.
     :param session: асинхронна сесія SQLAlchemy.
     :param for_update: чи потрібно блокувати рядок.
-    :return: Об'єкт Product або None, якщо не знайдено.
+    :return: Об'єкт ``Product`` або ``None``, якщо не знайдено.
     """
     need_own_session = session is None
     async_session_to_use = session or async_session()
@@ -326,7 +344,7 @@ async def orm_smart_import(*args: Any, **kwargs: Any) -> None:
 
     Майбутня реалізація має здійснювати валідацію даних, оновлення
     залишків та логування змін. Поки що функція піднімає
-    NotImplementedError, щоб повідомити про необхідність реалізації.
+    ``NotImplementedError``, щоб повідомити про необхідність реалізації.
     """
     raise NotImplementedError("orm_smart_import is not implemented yet")
 
@@ -347,10 +365,10 @@ def _extract_article(text: str | None) -> Optional[str]:
     Допоміжна функція для виділення артикула (8 цифр) з вхідного тексту.
 
     Використовує регулярний вираз для пошуку на початку рядка. Якщо
-    артикул не знайдено, повертає None.
+    артикул не знайдено, повертає ``None``.
 
     :param text: Текст, що може містити артикул.
-    :return: Рядок з 8 цифрами або None.
+    :return: Рядок з 8 цифрами або ``None``.
     """
     if not text:
         return None
