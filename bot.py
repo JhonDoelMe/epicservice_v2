@@ -13,6 +13,7 @@ from sqlalchemy import text
 from config import BOT_TOKEN
 from database.engine import async_session
 from handlers import (archive, common, error_handler, user_search)
+from handlers.admin import subtract_handlers as admin_subtract
 from handlers.admin import (archive_handlers as admin_archive,
                             core as admin_core,
                             import_handlers as admin_import,
