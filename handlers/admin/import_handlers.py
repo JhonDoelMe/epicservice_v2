@@ -50,10 +50,8 @@ from typing import Dict, List, Optional, Tuple
 
 import pandas as pd
 from aiogram import Bot, types, Dispatcher  # Dispatcher imported from aiogram root in v3
-# Removed import of `filters` from aiogram.dispatcher because in aiogram v3 filters module
-# is no longer available. We will use simple lambda functions for filtering callback data
-# instead of filters.Regexp.
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+from aiogram import Bot, types, Dispatcher, F # <--- ВИПРАВЛЕНО: Додайте F до загального імпорту
 from dotenv import load_dotenv
 
 # ------------------------------ КОНФІГ ---------------------------------------
@@ -497,24 +495,26 @@ def register(dp: Dispatcher) -> None:
     async def on_document(message: types.Message):
         """
         Handle incoming documents. If the document has an allowed extension, trigger a dry-run import.
-        Aiogram 3.x does not expose a ``message_handler`` decorator on ``Dispatcher``,
-        so we register the handler explicitly via ``dp.register_message_handler``.
         """
         doc: types.Document = message.document
         name = (doc.file_name or "").lower()
         if not any(name.endswith(ext) for ext in ALLOWED_EXT):
             return  # not our format
-        await _handle_import_file(message, dp.bot)
-    # Explicit registration of the message handler in aiogram v3
-    dp.register_message_handler(on_document, content_types=[types.ContentType.DOCUMENT])
+        
+        # [РЕКОМЕНДОВАНЕ ВИПРАВЛЕННЯ v3]: Використовуємо message.bot для коректного доступу
+        # до Bot, оскільки dp.bot може бути недоступним або неправильним у v3
+        await _handle_import_file(message, message.bot) 
+        
+    # [ВИПРАВЛЕНО]: Використання v3 API: dp.message.register з F-фільтром ContentType
+    dp.message.register(on_document, F.content_type == types.ContentType.DOCUMENT)
 
     # Підтвердження/скасування імпорту
-    # Filter callback queries by prefix using lambda since filters.Regexp is not available in aiogram v3
-    dp.register_callback_query_handler(
+    # [ВИПРАВЛЕНО]: Використання v3 API: dp.callback_query.register з F-фільтром
+    dp.callback_query.register(
         _cb_apply_import,
-        lambda cb: bool(cb.data) and cb.data.startswith("imp_apply:")
+        F.data.startswith("imp_apply:")
     )
-    dp.register_callback_query_handler(
+    dp.callback_query.register(
         _cb_cancel_import,
-        lambda cb: bool(cb.data) and cb.data.startswith("imp_cancel:")
+        F.data.startswith("imp_cancel:")
     )
