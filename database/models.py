@@ -14,7 +14,7 @@
 
 from __future__ import annotations
 
-from typing import Any, List, Tuple
+from typing import Any, List, Tuple, Optional
 
 from sqlalchemy import (
     BigInteger,
@@ -84,7 +84,9 @@ class Product(Base):
     кількість: Mapped[str] = mapped_column("qty", String(50))
 
     # Група (колонка 'group_name')
-    group_name: Mapped[str] | None = mapped_column(
+    # Назва групи (колонка 'group_name'). Використовуємо Optional[str] для
+    # коректної інтеграції з типізованим декларативом SQLAlchemy.
+    group_name: Mapped[Optional[str]] = mapped_column(
         "group_name", String(100), nullable=True
     )
 
