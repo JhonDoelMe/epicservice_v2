@@ -144,6 +144,10 @@ async def update_quantity_selector(callback: CallbackQuery, bot: Bot):
             # У будь‑якому випадку відповідаємо на callback, щоб Telegram прибрав "годинничок"
             await callback.answer()
 
+    except (ValueError, IndexError, Exception) as e:
+        # Ловимо будь-які інші помилки (наприклад, якщо callback.data не розбивається коректно)
+        logger.warning("Помилка оновлення лічильника: %s", e)
+        await callback.answer()
 
 
 @router.callback_query(F.data.startswith("add_confirm:"))
