@@ -34,6 +34,7 @@ from typing import Dict, Iterable, List, Optional, Tuple
 import pandas as pd
 from aiogram import types, Dispatcher  # Dispatcher imported from aiogram root
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+from aiogram.filters import Command  # Added for command filtering
 from dotenv import load_dotenv
 from sqlalchemy import and_
 
@@ -57,7 +58,6 @@ ALLOWED_EXPORT_EXT = ("xlsx", "ods", "csv")
 
 # Хто може викликати звіти (якщо логіка прав спрощена)
 ADMIN_IDS = set(int(x) for x in os.getenv("ADMIN_IDS", "").replace(" ", "").split(",") if x.strip().isdigit())
-
 
 # ------------------------------ Хелпери --------------------------------------
 
@@ -287,7 +287,9 @@ async def cb_report_menu(cb: types.CallbackQuery):
 
 def register(dp: Dispatcher) -> None:
     """
-    Підключення хендлерів звітів.
+    Підключення хендлерів звітів. Сумісно з aiogram 3.x.
     """
-    dp.register_message_handler(cmd_reports_start, commands=["reports", "report"])
-    dp.register_callback_query_handler(cb_report_menu, lambda c: c.data and c.data.startswith("rep:"))
+    # Реєструємо хендлер для команд «reports» та «report»
+    dp.message.register(cmd_reports_start, Command("reports", "report"))
+    # Реєструємо хендлер для callback-запитів, що починаються з «rep:»
+    dp.callback_query.register(cb_report_menu, lambda c: c.data and c.data.startswith("rep:"))
