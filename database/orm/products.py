@@ -8,6 +8,13 @@ This file mirrors the original structure but imports the Base metadata from
 ``ensure_schema``. This guarantees that the ``users`` table and other models
 defined in ``database/models.py`` are created alongside the product‑related
 tables defined here.
+
+Additionally, this version augments the :class:`Product` model with a set of
+Ukrainian‑named properties that proxy the existing English‑named attributes.
+These accessors provide backward compatibility for parts of the codebase that
+expect fields such as ``кількість`` or ``назва`` instead of ``qty`` and
+``name``. Where there is no direct equivalent (e.g. ``відкладено``), sensible
+defaults are returned (zero for reserved quantity, empty string for group).
 """
 
 from __future__ import annotations
@@ -74,6 +81,13 @@ class Product(Base):
       - price — ціна за одиницю
       - months_no_move — скільки місяців без руху (0, якщо не рахуємо)
       - active — чи активний товар у довіднику
+
+    This model stores product information using concise English attribute
+    names. To support other parts of the application that expect
+    Ukrainian‑named attributes (e.g. ``кількість``), this class defines
+    properties that map the Ukrainian names to the underlying English ones.
+    These properties also provide sensible defaults where the English model
+    lacks a direct counterpart (for example, reserved quantity).
     """
 
     __tablename__ = "products"
@@ -99,6 +113,135 @@ class Product(Base):
         Index("ix_products_dept", "dept_id"),
         Index("ix_products_active", "active"),
     )
+
+    # -------------------------------------------------------------------------
+    # Ukrainian‑named accessors
+    #
+    # A number of modules within the project operate on instances of this
+    # ``Product`` class using Ukrainian field names (e.g. ``кількість``,
+    # ``назва``). To maintain compatibility without duplicating the model, we
+    # expose a set of properties that proxy these Ukrainian names to the
+    # underlying English attributes. When a direct mapping does not exist
+    # (e.g. reserved quantity), we return a sensible default.
+
+    # --- Article / Артикул ---
+    @property
+    def артикул(self) -> str:
+        return self.article
+
+    @артикул.setter
+    def артикул(self, value: str) -> None:
+        self.article = value
+
+    # --- Name / Назва ---
+    @property
+    def назва(self) -> str:
+        return self.name
+
+    @назва.setter
+    def назва(self, value: str) -> None:
+        self.name = value
+
+    # --- Department / Відділ ---
+    @property
+    def відділ(self) -> str:
+        return self.dept_id
+
+    @відділ.setter
+    def відділ(self, value: str) -> None:
+        self.dept_id = value
+
+    # --- Group / Група ---
+    @property
+    def група(self) -> str:
+        # The English model has no explicit 'group' field; return an empty
+        # string to signal that no group is defined.
+        return ""
+
+    @група.setter
+    def група(self, value: str) -> None:
+        # Ignore assignments to group as this model does not persist them.
+        pass
+
+    # --- Quantity / Кількість ---
+    @property
+    def кількість(self) -> str:
+        # Convert the float quantity to a string, preserving decimals. This
+        # mirrors the behaviour of the Ukrainian model, where quantities are
+        # stored as strings in the database.
+        return str(self.qty)
+
+    @кількість.setter
+    def кількість(self, value: Any) -> None:
+        try:
+            self.qty = float(str(value).replace(",", "."))
+        except (ValueError, TypeError):
+            # If parsing fails, reset quantity to 0.0 as a safe fallback.
+            self.qty = 0.0
+
+    # --- Reserved / Відкладено ---
+    @property
+    def відкладено(self) -> float:
+        # There is no reserved quantity field in the English model. We return
+        # zero by default; callers that rely on reserved quantities should
+        # compute it via other tables (e.g. picklists) if needed.
+        return 0.0
+
+    @відкладено.setter
+    def відкладено(self, value: Any) -> None:
+        # The English model has no place to store reserved quantities. Ignore
+        # attempts to set a value.
+        pass
+
+    # --- Months without movement / Місяці без руху ---
+    @property
+    def місяці_без_руху(self) -> float:
+        return self.months_no_move
+
+    @місяці_без_руху.setter
+    def місяці_без_руху(self, value: Any) -> None:
+        try:
+            self.months_no_move = float(value)
+        except (ValueError, TypeError):
+            self.months_no_move = 0.0
+
+    # --- Price / Ціна ---
+    @property
+    def ціна(self) -> float:
+        return self.price
+
+    @ціна.setter
+    def ціна(self, value: Any) -> None:
+        try:
+            self.price = float(value)
+        except (ValueError, TypeError):
+            self.price = 0.0
+
+    # --- Stock sum / Сума залишку ---
+    @property
+    def сума_залишку(self) -> Optional[float]:
+        # Compute the approximate stock sum as quantity multiplied by price.
+        try:
+            return float(self.qty) * float(self.price)
+        except (ValueError, TypeError):
+            return None
+
+    @сума_залишку.setter
+    def сума_залишку(self, value: Any) -> None:
+        # The English model does not store the stock sum separately. Ignore
+        # attempts to assign to this property.
+        pass
+
+    # --- Active status / Активний ---
+    @property
+    def активний(self) -> bool:
+        return bool(self.active)
+
+    @активний.setter
+    def активний(self, value: Any) -> None:
+        self.active = bool(value)
+
+    # -------------------------------------------------------------------------
 
 
 class ProductCardCache(Base):
