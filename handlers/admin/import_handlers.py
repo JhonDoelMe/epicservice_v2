@@ -204,12 +204,25 @@ def _humanize_report(stats: Dict[str, float],
 
 
 def _kb_confirm(token: str) -> InlineKeyboardMarkup:
-    kb = InlineKeyboardMarkup(row_width=2)
-    kb.add(
-        InlineKeyboardButton("✅ Застосувати імпорт", callback_data=f"imp_apply:{token}"),
-        InlineKeyboardButton("❌ Скасувати", callback_data=f"imp_cancel:{token}"),
+    """Створює клавіатуру підтвердження для імпорту.
+
+    У aiogram 3.x необхідно передавати ``inline_keyboard`` під час
+    ініціалізації ``InlineKeyboardMarkup``, інакше виникає валідаційна помилка.
+    """
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="✅ Застосувати імпорт",
+                    callback_data=f"imp_apply:{token}"
+                ),
+                InlineKeyboardButton(
+                    text="❌ Скасувати",
+                    callback_data=f"imp_cancel:{token}"
+                ),
+            ]
+        ]
     )
-    return kb
 
 
 # ------------------------------ ОСНОВНА ЛОГІКА --------------------------------
