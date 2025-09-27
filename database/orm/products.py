@@ -1,26 +1,21 @@
 # -*- coding: utf-8 -*-
 """
-SQLAlchemy-моделі для ERP-бота.
+Доповнена версія модуля ``database.orm.products``.
 
-Таблиці:
-- products                  — довідник/залишки товарів (істина з БД)
-- product_card_cache        — L2-кеш карток (JSON + file_id), інвалідується після змін
-- product_photos            — фото товарів (до 3 шт/артикул, з модерацією)
-- picklist_items            — «алокація» користувача (те, що списано з БД у список)
-- picklist_overflow_items   — «надлишки» користувача (поза БД, лише у паралельному списку)
-
-Примітки:
-- Унікальність товару — за (dept_id, article).
-- «Надлишки» НЕ впливають на таблицю products.
-- Часові поля onupdate через події SQLAlchemy.
+Цей файл містить SQLAlchemy‑моделі для ERP‑бота та додаткові ORM‑функції,
+які раніше були відсутні. Функції необхідні для роботи інших частин
+додатку, зокрема обробників та роутерів. Вони надають інтерфейси для
+пошуку, отримання та переліку товарів. Деякі функції залишені як
+заглушки для майбутньої реалізації.
 """
 
 from __future__ import annotations
 
 import enum
 import json
+import re
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any, Iterable, List, Optional
 
 from sqlalchemy import (
     JSON,
@@ -32,12 +27,16 @@ from sqlalchemy import (
     Index,
     Integer,
     String,
-    Text,
     UniqueConstraint,
     event,
     func,
+    or_,
+    select,
 )
-from sqlalchemy.orm import declarative_base
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import Session, declarative_base
+
+from database.engine import async_session, sync_session
 
 Base = declarative_base()
 
@@ -46,6 +45,7 @@ Base = declarative_base()
 
 class PhotoStatus(str, enum.Enum):
     """Статус фото для модерації."""
+
     PENDING = "pending"
     APPROVED = "approved"
     REJECTED = "rejected"
@@ -66,6 +66,7 @@ class Product(Base):
       - months_no_move — скільки місяців без руху (0, якщо не рахуємо)
       - active — чи активний товар у довіднику
     """
+
     __tablename__ = "products"
 
     id = Column(Integer, primary_key=True)
@@ -93,18 +94,19 @@ class Product(Base):
 
 class ProductCardCache(Base):
     """
-    L2-кеш для карток товару.
+    L2‑кеш для карток товару.
 
     - card_json: мінімально достатній JSON для швидкого рендеру картки
     - file_id: останній валідний Telegram file_id фото (якщо є)
     """
+
     __tablename__ = "product_card_cache"
 
     id = Column(Integer, primary_key=True)
     dept_id = Column(String(32), nullable=False)
     article = Column(String(32), nullable=False)
 
-    card_json = Column(JSON, nullable=False, default=dict)   # зберігаємо словник
+    card_json = Column(JSON, nullable=False, default=dict)  # зберігаємо словник
     file_id = Column(String(256), nullable=True)
 
     updated_at = Column(DateTime, nullable=False, default=func.now())
@@ -122,6 +124,7 @@ class ProductPhoto(Base):
     - image_hash: короткий хеш для видалення дублікатів
     - order_no: для сортування (1..3)
     """
+
     __tablename__ = "product_photos"
 
     id = Column(Integer, primary_key=True)
@@ -151,6 +154,7 @@ class PicklistItem(Base):
     - qty_alloc: скільки зарезервовано з БД для цього користувача
     - price_at_moment: ціна за одиницю на момент додавання
     """
+
     __tablename__ = "picklist_items"
 
     id = Column(Integer, primary_key=True)
@@ -171,7 +175,9 @@ class PicklistItem(Base):
         Index("ix_pick_alloc_user_dept", "user_id", "dept_id"),
         CheckConstraint("qty_alloc >= 0", name="ck_pick_alloc_nonneg"),
         # Можна зробити унікальність на (user_id, dept_id, article), щоб не плодити рядки
-        UniqueConstraint("user_id", "dept_id", "article", name="uq_pick_alloc_user_dept_article"),
+        UniqueConstraint(
+            "user_id", "dept_id", "article", name="uq_pick_alloc_user_dept_article"
+        ),
     )
 
 
@@ -182,6 +188,7 @@ class PicklistOverflowItem(Base):
     - qty_overflow: що було запрошено понад доступне в БД
     - «надлишки» НЕ змінюють products.qty
     """
+
     __tablename__ = "picklist_overflow_items"
 
     id = Column(Integer, primary_key=True)
@@ -201,14 +208,16 @@ class PicklistOverflowItem(Base):
         Index("ix_pick_over_dept_article", "dept_id", "article"),
         Index("ix_pick_over_user_dept", "user_id", "dept_id"),
         CheckConstraint("qty_overflow >= 0", name="ck_pick_over_nonneg"),
-        UniqueConstraint("user_id", "dept_id", "article", name="uq_pick_over_user_dept_article"),
+        UniqueConstraint(
+            "user_id", "dept_id", "article", name="uq_pick_over_user_dept_article"
+        ),
     )
 
 
 # --------------------------- Автооновлення timestamp -------------------------
 
-def _touch_updated(mapper, connection, target):
-    """Оновлює поле updated_at при будь-якому апдейті/інсерті."""
+def _touch_updated(mapper, connection, target) -> None:
+    """Оновлює поле updated_at при будь‑якому апдейті/інсерті."""
     if hasattr(target, "updated_at"):
         connection.execute(
             target.__table__.update()
@@ -233,3 +242,117 @@ def ensure_schema(engine) -> None:
         ensure_schema(engine)
     """
     Base.metadata.create_all(bind=engine)
+
+
+# ------------------------------ ORM‑функції -----------------------------------
+
+async def orm_find_products(
+    search_query: str,
+    dept_id: Optional[str] = None,
+    limit: int = 30,
+) -> List[Product]:
+    """
+    Виконує пошук товарів за артикулом або назвою.
+
+    Повертає список товарів, де `article` або `name` містять рядок
+    `search_query`. Якщо вказано `dept_id`, пошук обмежується заданим
+    підрозділом. Нечіткий пошук може бути реалізований у майбутньому.
+
+    :param search_query: Рядок для пошуку (артикул або частина назви).
+    :param dept_id: (необов'язково) ідентифікатор підрозділу.
+    :param limit: Максимальна кількість результатів.
+    :return: Список об'єктів `Product`.
+    """
+    # Формуємо фільтр: порівнюємо article та name незалежно від регістру
+    pattern = f"%{search_query}%"
+    async with async_session() as session:
+        stmt = select(Product).where(
+            or_(Product.article.ilike(pattern), Product.name.ilike(pattern))
+        )
+        if dept_id:
+            stmt = stmt.where(Product.dept_id == dept_id)
+        stmt = stmt.order_by(Product.name.asc()).limit(limit)
+        result = await session.execute(stmt)
+        return list(result.scalars().unique())
+
+
+async def orm_get_product_by_id(
+    product_id: int,
+    *,
+    session: Optional[AsyncSession] = None,
+    for_update: bool = False,
+) -> Optional[Product]:
+    """
+    Повертає товар за його ID.
+
+    Якщо `for_update=True`, рядок блокується для оновлення (SELECT ... FOR UPDATE).
+    Можна передати вже відкриту сесію для оптимізації; якщо ні — буде створена нова.
+
+    :param product_id: ID товару.
+    :param session: асинхронна сесія SQLAlchemy.
+    :param for_update: чи потрібно блокувати рядок.
+    :return: Об'єкт Product або None, якщо не знайдено.
+    """
+    need_own_session = session is None
+    async_session_to_use = session or async_session()
+    if need_own_session:
+        async with async_session_to_use as local_session:
+            stmt = select(Product).where(Product.id == product_id)
+            if for_update:
+                stmt = stmt.with_for_update()
+            res = await local_session.execute(stmt)
+            return res.scalar_one_or_none()
+    else:
+        stmt = select(Product).where(Product.id == product_id)
+        if for_update:
+            stmt = stmt.with_for_update()
+        res = await session.execute(stmt)
+        return res.scalar_one_or_none()
+
+
+def orm_get_all_products_sync() -> List[Product]:
+    """
+    Повертає всі товари у синхронному режимі.
+
+    Використовується у задачах та скриптах, які не є асинхронними.
+    """
+    with sync_session() as session:
+        return session.query(Product).all()
+
+
+async def orm_smart_import(*args: Any, **kwargs: Any) -> None:
+    """
+    Плейсхолдер для імпорту даних із файлів Excel.
+
+    Майбутня реалізація має здійснювати валідацію даних, оновлення
+    залишків та логування змін. Поки що функція піднімає
+    NotImplementedError, щоб повідомити про необхідність реалізації.
+    """
+    raise NotImplementedError("orm_smart_import is not implemented yet")
+
+
+async def orm_subtract_collected(*args: Any, **kwargs: Any) -> None:
+    """
+    Плейсхолдер для зменшення залишків після формування списку.
+
+    У майбутньому ця функція повинна списувати зарезервовані кількості
+    з таблиці ``products``, вести облік виконаних операцій та
+    забезпечувати транзакційну цілісність. Наразі вона не реалізована.
+    """
+    raise NotImplementedError("orm_subtract_collected is not implemented yet")
+
+
+def _extract_article(text: str | None) -> Optional[str]:
+    """
+    Допоміжна функція для виділення артикула (8 цифр) з вхідного тексту.
+
+    Використовує регулярний вираз для пошуку на початку рядка. Якщо
+    артикул не знайдено, повертає None.
+
+    :param text: Текст, що може містити артикул.
+    :return: Рядок з 8 цифрами або None.
+    """
+    if not text:
+        return None
+    m = re.match(r"^\s*(\d{8})\b", text)
+    return m.group(1) if m else None
