@@ -14,7 +14,7 @@
 
 from __future__ import annotations
 
-from typing import Any, List, Tuple, Optional
+from typing import Any, List, Tuple
 
 from sqlalchemy import (
     BigInteger,
@@ -84,11 +84,6 @@ class Product(Base):
     кількість: Mapped[str] = mapped_column("qty", String(50))
 
     # Група (колонка 'group_name')
-    # Назва групи (колонка 'group_name'). Використовуємо Optional[str] для
-    # коректної інтеграції з типізованим декларативом SQLAlchemy.
-    group_name: Mapped[Optional[str]] = mapped_column(
-        "group_name", String(100), nullable=True
-    )
 
     # Місяці без руху (колонка 'months_no_move')
     місяці_без_руху: Mapped[int] = mapped_column(
@@ -111,13 +106,16 @@ class Product(Base):
 
     @property
     def група(self) -> str:
-        """Повертає назву групи або порожній рядок, якщо група відсутня."""
-        return self.group_name or ""
+        """
+        Таблиця ``products`` не містить колонки для групи. Це поле
+        повертає порожній рядок для сумісності з інтерфейсом.
+        """
+        return ""
 
     @група.setter
     def група(self, value: str) -> None:
-        """Зберігає назву групи у полі `group_name`. Якщо None — ставить None."""
-        self.group_name = value if value is not None else None
+        """Пропускає встановлення назви групи, оскільки вона не зберігається."""
+        pass
 
     @property
     def відкладено(self) -> int:
