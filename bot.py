@@ -9,7 +9,8 @@ from aiogram import Router
 from sqlalchemy import text
 
 from config import BOT_TOKEN
-from database.engine import async_session
+from database.engine import async_session, sync_engine
+from database.orm.products import ensure_schema
 from handlers import (archive, common, error_handler, user_search)
 from handlers.admin import subtract_handlers as admin_subtract
 from handlers.admin import (archive_handlers as admin_archive,
@@ -71,6 +72,16 @@ async def main():
         logger.info("Підключення до бази даних успішне.")
     except Exception as e:
         logger.critical("Помилка підключення до бази даних: %s", e, exc_info=True)
+        sys.exit(1)
+
+    # --- Створення схеми БД (автоматично при першому запуску) ---
+    # Використовуємо синхронний engine для створення таблиць. Якщо таблиць ще немає,
+    # ensure_schema створить їх. В іншому випадку виклик буде безпечним.
+    try:
+        ensure_schema(sync_engine)
+        logger.info("Схема БД перевірена/створена автоматично.")
+    except Exception as e:
+        logger.critical("Помилка створення схеми БД: %s", e, exc_info=True)
         sys.exit(1)
 
     bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(
