@@ -321,7 +321,8 @@ async def _handle_import_file(message: types.Message, bot: Bot) -> None:
 
     # Прочитати і нормалізувати
     try:
-        raw_df = read_any_spreadsheet(saved_path)
+        # read_any_spreadsheet expects a string path; convert Path to str
+        raw_df = read_any_spreadsheet(str(saved_path))
         norm = normalize_import_table(raw_df).require_any_articles()
     except NoArticlesError:
         await message.answer("⚠️ Імпорт скасовано: не знайдено жодного артикула у файлі.\n"
