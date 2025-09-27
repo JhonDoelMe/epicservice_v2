@@ -8,7 +8,7 @@ provides convenience helpers to read and write pandas ``DataFrame`` objects
 without worrying about which underlying engine is required. Additionally, it
 contains a helper to normalise numeric data stored as text (often with
 whitespace or comma separators) into proper numeric types.  These helpers are
-used throughout the import handlers to ensure consistent data handling.
+used throughout the import and report handlers to ensure consistent data handling.
 
 Functions
 ---------
@@ -25,17 +25,10 @@ coerce_numeric_columns(df: pandas.DataFrame, columns: Optional[Iterable[str]] = 
     numeric. Cleans whitespace and replaces commas with dots before
     conversion.
 
-Example
--------
->>> import pandas as pd
->>> from utils.io_spreadsheet import read_any_spreadsheet, write_any_spreadsheet, coerce_numeric_columns
-
->>> df = read_any_spreadsheet("/path/to/input.xlsx")
->>> df = coerce_numeric_columns(df)
->>> write_any_spreadsheet(df, "output.csv")
-
-This will read the Excel file, attempt to convert any textual number columns into
-numeric types and then write the result as a CSV.
+write_table(df: pandas.DataFrame, path: str, fmt: str = "xlsx", sheet_name: str = "Sheet1", index: bool = False) -> None
+    Write a ``DataFrame`` to disk using the specified format. Supports Excel,
+    OpenDocument Spreadsheet and CSV formats. The format is chosen by the
+    ``fmt`` argument rather than the file extension of ``path``.
 """
 
 from __future__ import annotations
@@ -177,3 +170,58 @@ def coerce_numeric_columns(df: pd.DataFrame, columns: Optional[Iterable[str]] = 
         # Try to convert to numeric; invalid parsing will stay as string
         df[col] = pd.to_numeric(cleaned, errors='ignore')
     return df
+
+
+def write_table(
+    df: pd.DataFrame,
+    path: str,
+    fmt: str = "xlsx",
+    sheet_name: str = "Sheet1",
+    index: bool = False,
+) -> None:
+    """Write a DataFrame to disk in the specified spreadsheet format.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        DataFrame to write.
+    path : str
+        Base path or file name where the table should be saved. The file extension
+        is ignored; the format is determined by the ``fmt`` argument.
+    fmt : str, optional
+        Format to use for output ('xlsx', 'ods' or 'csv'). Default is 'xlsx'.
+    sheet_name : str, optional
+        Name of the sheet when saving to Excel or ODS formats.
+    index : bool, optional
+        Whether to write DataFrame index into the file. Defaults to False.
+
+    Raises
+    ------
+    ValueError
+        If the provided format is not supported.
+    RuntimeError
+        If writing ODS files is requested but the required engine is not installed.
+    """
+    ext = fmt.lower().lstrip(".")
+    # Accept both xlsx and xlsm as Excel formats
+    if ext not in ("xlsx", "xlsm", "ods", "csv"):
+        raise ValueError(f"Unsupported format: {fmt}")
+    # Determine full output path with correct suffix
+    from pathlib import Path
+    output_path = Path(path).with_suffix(f".{ext}")
+    # Excel formats
+    if ext in ("xlsx", "xlsm"):
+        df.to_excel(output_path, index=index, engine='openpyxl', sheet_name=sheet_name)
+        return
+    # OpenDocument Spreadsheet
+    if ext == "ods":
+        try:
+            df.to_excel(output_path, index=index, engine='odf', sheet_name=sheet_name)
+        except ImportError as exc:
+            raise RuntimeError(
+                "Writing .ods files requires the optional dependency 'odfpy'."
+            ) from exc
+        return
+    # CSV
+    df.to_csv(output_path, index=index)
+    return
