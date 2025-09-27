@@ -1,5 +1,21 @@
 # epicservice/keyboards/inline.py
 
+"""
+Inline keyboard builders for the Epic Service bot.
+
+Цей файл містить функції, що створюють різні інлайн‑клавіатури для бота:
+ - головне меню користувача та адміністратора
+ - адмін‑панель
+ - результати пошуку
+ - дії з товаром
+ - редагування кількості та інші допоміжні клавіатури
+
+У версії, наведеної нижче, функцію ``get_search_results_kb`` оновлено для
+підтримки моделей товарів, де назва зберігається під атрибутом ``назва`` або
+``name``. Це виправляє помилку ``AttributeError: 'Product' object has no attribute 'назва'``
+під час пошуку.
+"""
+
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 from database.models import Product, TempList
@@ -108,7 +124,12 @@ def get_archive_kb(user_id: int, is_admin_view: bool = False) -> InlineKeyboardM
 def get_search_results_kb(products: list[Product]) -> InlineKeyboardMarkup:
     keyboard = []
     for product in products:
-        button_text = (product.назва[:60] + '..') if len(product.назва) > 62 else product.назва
+        # Підтримуємо як українські назви полів (назва), так і англійські (name)
+        product_name = getattr(product, 'назва', None) or getattr(product, 'name', '')
+        if len(product_name) > 62:
+            button_text = product_name[:60] + '..'
+        else:
+            button_text = product_name
         keyboard.append([
             InlineKeyboardButton(text=button_text, callback_data=f"product:{product.id}")
         ])
@@ -269,8 +290,6 @@ def get_list_for_editing_kb(temp_list: list[TempList]) -> InlineKeyboardMarkup:
     ])
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
-
-# ---------------------- Нове: клавіатура картки з кешем ----------------------
 
 def get_cached_product_kb(dept_id: str, article: str, can_add: bool) -> InlineKeyboardMarkup:
     """
