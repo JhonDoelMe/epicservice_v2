@@ -1,52 +1,58 @@
-# --- Основной фреймворк для Telegram-бота ---
-aiogram>=3.12.0
+# --- Основний фреймворк для Telegram-бота ---
+aiogram==3.10.0
 
-# --- Работа с базой данных (PostgreSQL) ---
-SQLAlchemy>=2.0.43
-asyncpg>=0.30.0
-psycopg2-binary>=2.9.10
+# --- Робота з базою даних (PostgreSQL) ---
+SQLAlchemy==2.0.42      # ORM для взаємодії з БД
+asyncpg==0.30.0         # Асинхронний драйвер для PostgreSQL (використовується з SQLAlchemy)
+psycopg2-binary==2.9.10 # Синхронний драйвер для PostgreSQL (для Alembic та фонових завдань)
+alembic==1.13.2         # Інструмент для міграцій схеми бази даних
 
-# --- Работа с данными и файлами ---
-pandas>=2.3.2
-openpyxl>=3.1.5
-aiofiles>=24.1.0
+# --- Робота з даними та файлами ---
+pandas==2.2.2           # Аналіз даних, використовується для роботи з Excel
+openpyxl==3.1.3         # Читання та запис .xlsx файлів для Pandas
+aiofiles==23.2.1        # Асинхронна робота з файлами
 
-# --- Нечёткий поиск ---
-thefuzz>=0.22.1
+# --- Нечіткий пошук ---
+thefuzz==0.22.1         # Бібліотека для нечіткого порівняння рядків
 
-# --- Планировщик фоновых задач ---
-apscheduler>=3.10.4
+# --- Планувальник фонових завдань ---
+apscheduler==3.10.4     # Виконання завдань за розкладом (очищення, розсилки)
 
-# --- Конфигурация и переменные окружения ---
-python-dotenv>=1.0.1
+# --- Конфігурація та змінні оточення ---
+python-dotenv==1.0.1    # Завантаження змінних з .env файлу
 
-# --- Базовые зависимости (можно без жёсткой фиксации, но для стабильности можно оставить) ---
-aiohttp>=3.10
-aiosignal>=1.4
-annotated-types>=0.7
-async-timeout>=4.0
-attrs>=25.3
-cachetools>=5.5
-certifi>=2025.7
-charset-normalizer>=3.4
-et_xmlfile>=2.0
-frozenlist>=1.7
-greenlet>=3.2
-idna>=3.10
-magic-filter>=1.0.12
-multidict>=6.6
-numpy>=2.2
-pydantic>=2.9
-pydantic_core>=2.21
-pyparsing>=3.2
-python-dateutil>=2.9
-pytz>=2025.2
-requests>=2.32
-six>=1.17
-StrEnum>=0.4
-typing_extensions>=4.14
-tzdata>=2025.2
-urllib3>=2.5
-yarl>=1.20
-loguru>=0.7
-xlrd>=2.0
+# --- Допоміжні та залежності залежностей ---
+# Ці пакети, як правило, встановлюються автоматично разом із основними,
+# але їх фіксація гарантує стабільність збірки.
+aiohttp==3.9.5
+aiosignal==1.4.0
+annotated-types==0.7.0
+async-timeout==4.0.3
+attrs==25.3.0
+cachetools==5.5.2
+certifi==2025.7.14
+charset-normalizer==3.4.2
+et_xmlfile==2.0.0
+frozenlist==1.7.0
+greenlet==3.2.3
+idna==3.10
+magic-filter==1.0.12
+multidict==6.6.3
+numpy==2.2.6
+pydantic==2.8.2
+pydantic_core==2.20.1
+pyparsing==3.2.3
+python-dateutil==2.9.0.post0
+pytz==2025.2
+requests==2.32.4
+six==1.17.0
+StrEnum==0.4.15
+typing_extensions==4.14.1
+tzdata==2025.2
+urllib3==2.5.0
+yarl==1.20.1
+
+# Залежності, які ви видалили (google-auth, gspread), я прибрав зі списку
+# --- Інструменти для розробки (опціонально, але рекомендовано) ---
+# black==24.4.2          # Автоматичне форматування коду
+# isort==5.13.2           # Автоматичне сортування імпортів
