@@ -33,6 +33,7 @@ from typing import Dict, List
 import pandas as pd  # type: ignore
 from aiogram import Bot, F, Router, types
 from aiogram.exceptions import TelegramBadRequest
+from aiogram.types import FSInputFile
 
 from config import ADMIN_IDS, ARCHIVES_PATH
 from database.models import Product, SavedListItem
@@ -136,10 +137,10 @@ async def _send_dataframe_as_document(cb: types.CallbackQuery, df: pd.DataFrame,
         df.to_csv(csv_path, index=False)
         file_path = csv_path
     try:
-        await cb.message.answer_document(types.InputFile(file_path), caption=caption)
+        await cb.message.answer_document(FSInputFile(file_path), caption=caption)
     except TelegramBadRequest:
         # Якщо редагування повідомлення неможливе, надсилаємо нове
-        await cb.message.answer_document(types.InputFile(file_path), caption=caption)
+        await cb.message.answer_document(FSInputFile(file_path), caption=caption)
 
 
 @router.callback_query(F.data == "admin:export_stock")
