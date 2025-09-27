@@ -1,9 +1,31 @@
-# epicservice/database/models.py
+"""
+Моделі SQLAlchemy для таблиць бази даних.
 
-from typing import List
+Цей модуль містить класи, що відображають користувачів, тимчасові та
+збережені списки, а також товари. Для сумісності з існуючими частинами
+проєкту поля моделі ``Product`` мають українські назви, але
+відображаються на англомовні стовпці у таблиці ``products``.
 
-from sqlalchemy import (BigInteger, Boolean, DateTime, Float, ForeignKey, Integer,
-                        String, func)
+Клас ``Product`` у цій версії не зберігає поля «група», «відкладено» та
+«сума_залишку» у базі даних, оскільки відповідні колонки відсутні. Вони
+реалізовані як властивості, що повертають значення за замовчуванням або
+обчислюються на льоту.
+"""
+
+from __future__ import annotations
+
+from typing import Any, List, Tuple
+
+from sqlalchemy import (
+    BigInteger,
+    Boolean,
+    DateTime,
+    Float,
+    ForeignKey,
+    Integer,
+    String,
+    func,
+)
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -14,7 +36,8 @@ class Base(DeclarativeBase):
 
 class User(Base):
     """Модель, що представляє користувача бота."""
-    __tablename__ = 'users'
+
+    __tablename__ = "users"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=False)
     username: Mapped[str] = mapped_column(String(100), nullable=True)
@@ -26,32 +49,99 @@ class User(Base):
 
 
 class Product(Base):
-    """Модель, що представляє товар на складі."""
-    __tablename__ = 'products'
+    """
+    Модель, що представляє товар на складі.
+
+    Атрибути цієї моделі мають українські назви, але фізично
+    зберігаються у колонках з англомовними іменами. Це дозволяє
+    використовувати зручні для користувача назви полів без порушення
+    відповідності схемі бази даних, у якій стовпці мають імена
+    ``article``, ``name``, ``dept_id``, ``qty``, ``months_no_move``,
+    ``price`` та ``active``.
+
+    Поля ``група``, ``відкладено`` та ``сума_залишку`` не мають
+    відповідних стовпців у таблиці ``products``. Вони реалізовані як
+    властивості з розумними значеннями за замовчуванням.
+    """
+
+    __tablename__ = "products"
+
+    # Первинний ключ
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    артикул: Mapped[str] = mapped_column(String(20), unique=True, index=True)
-    назва: Mapped[str] = mapped_column(String(255))
-    відділ: Mapped[int] = mapped_column(BigInteger)
-    група: Mapped[str] = mapped_column(String(100))
-    кількість: Mapped[str] = mapped_column(String(50))
-    відкладено: Mapped[int] = mapped_column(Integer, default=0)
-    
-    # --- ОНОВЛЕНІ ТА НОВІ ПОЛЯ (УКРАЇНСЬКОЮ) ---
-    # "м" - місяців без руху
-    місяці_без_руху: Mapped[int] = mapped_column(Integer, nullable=True, default=0)
-    # "с" - сума залишку
-    сума_залишку: Mapped[float] = mapped_column(Float, nullable=True, default=0.0)
-    # "ц" - ціна за одиницю
-    ціна: Mapped[float] = mapped_column(Float, nullable=True, default=0.0)
-    # Статус активності товару
-    активний: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+
+    # Артикул (колонка 'article')
+    артикул: Mapped[str] = mapped_column(
+        "article", String(20), unique=True, index=True
+    )
+
+    # Назва (колонка 'name')
+    назва: Mapped[str] = mapped_column("name", String(255))
+
+    # Відділ (колонка 'dept_id')
+    відділ: Mapped[int] = mapped_column("dept_id", BigInteger)
+
+    # Кількість (колонка 'qty')
+    кількість: Mapped[str] = mapped_column("qty", String(50))
+
+    # Місяці без руху (колонка 'months_no_move')
+    місяці_без_руху: Mapped[int] = mapped_column(
+        "months_no_move", Integer, nullable=True, default=0
+    )
+
+    # Ціна за одиницю (колонка 'price')
+    ціна: Mapped[float] = mapped_column(
+        "price", Float, nullable=True, default=0.0
+    )
+
+    # Статус активності (колонка 'active')
+    активний: Mapped[bool] = mapped_column(
+        "active", Boolean, default=True, index=True
+    )
+
+    # ------------------------------------------------------------------
+    # Поля, що не зберігаються у таблиці, але потрібні для сумісності
+
+    @property
+    def група(self) -> str:
+        """Повертає порожній рядок, оскільки колонка для групи відсутня."""
+        return ""
+
+    @група.setter
+    def група(self, value: str) -> None:
+        """Ігнорує встановлення групи, оскільки поле не зберігається."""
+        pass
+
+    @property
+    def відкладено(self) -> int:
+        """Повертає нуль, оскільки відкладена кількість не зберігається."""
+        return 0
+
+    @відкладено.setter
+    def відкладено(self, value: Any) -> None:
+        """Ігнорує встановлення відкладеної кількості."""
+        pass
+
+    @property
+    def сума_залишку(self) -> float:
+        """Обчислює суму залишку як кількість, помножену на ціну."""
+        try:
+            return float(str(self.кількість).replace(",", ".")) * float(self.ціна)
+        except (ValueError, TypeError):
+            return 0.0
+
+    @сума_залишку.setter
+    def сума_залишку(self, value: Any) -> None:
+        """Ігнорує встановлення суми залишку, бо вона не зберігається окремо."""
+        pass
 
 
 class SavedList(Base):
     """Модель, що представляє збережений список товарів користувача."""
-    __tablename__ = 'saved_lists'
+
+    __tablename__ = "saved_lists"
+
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    user_id: Mapped[int] = mapped_column(ForeignKey('users.id'), index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
     file_name: Mapped[str] = mapped_column(String(100))
     file_path: Mapped[str] = mapped_column(String(255))
     created_at: Mapped[DateTime] = mapped_column(DateTime, default=func.now())
@@ -62,9 +152,11 @@ class SavedList(Base):
 
 class SavedListItem(Base):
     """Модель, що представляє один пункт у збереженому списку."""
-    __tablename__ = 'saved_list_items'
+
+    __tablename__ = "saved_list_items"
+
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    list_id: Mapped[int] = mapped_column(ForeignKey('saved_lists.id'))
+    list_id: Mapped[int] = mapped_column(ForeignKey("saved_lists.id"))
     article_name: Mapped[str] = mapped_column(String(255))
     quantity: Mapped[int] = mapped_column(Integer)
 
@@ -73,11 +165,14 @@ class SavedListItem(Base):
 
 class TempList(Base):
     """Модель, що представляє тимчасовий (поточний) список товарів користувача."""
-    __tablename__ = 'temp_lists'
+
+    __tablename__ = "temp_lists"
+
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    user_id: Mapped[int] = mapped_column(ForeignKey('users.id'), index=True)
-    product_id: Mapped[int] = mapped_column(ForeignKey('products.id'))
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    product_id: Mapped[int] = mapped_column(ForeignKey("products.id"))
     quantity: Mapped[int] = mapped_column(Integer)
 
+    # Зв'язок із товаром та користувачем
     product: Mapped["Product"] = relationship()
     user: Mapped["User"] = relationship(back_populates="temp_list_items")
