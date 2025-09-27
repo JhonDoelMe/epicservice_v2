@@ -12,19 +12,22 @@ from config import BOT_TOKEN
 from database.engine import async_session, sync_engine
 from database.orm.products import ensure_schema
 from handlers import (archive, common, error_handler, user_search)
-from handlers.admin import subtract_handlers as admin_subtract
+from handlers.admin import subtract_handlers as admin_subtract  # type: ignore
 from handlers.admin import (archive_handlers as admin_archive,
-                            core as admin_core,
-                            import_handlers as admin_import,
-                            report_handlers as admin_reports,
-                            photo_admin)
+                             core as admin_core,
+                             import_handlers as admin_import,
+                             report_handlers as admin_reports,
+                             photo_admin)  # type: ignore
 from handlers.user import (item_addition, list_editing, list_management,
-                           list_saving, product_bridge)
-from middlewares.logging_middleware import LoggingMiddleware
+                           list_saving, product_bridge)  # type: ignore
+from middlewares.logging_middleware import LoggingMiddleware  # type: ignore
 
 # Нове: імпортуємо хендлери карток/додавання з кешем
-from handlers.user.card_handlers import open_product  # open:<dept>:<article>
-from handlers.user.add_handlers import add_fixed      # add:<dept>:<article>:N
+from handlers.user.card_handlers import open_product  # type: ignore
+from handlers.user.add_handlers import add_fixed      # type: ignore
+
+# --- Нове: імпортуємо роутер експортних хендлерів ---
+from handlers.admin.export_actions import router as admin_export_router
 
 # Спроба увімкнути «анти-глухий кут», якщо сумісний з aiogram 3.x
 try:
@@ -33,7 +36,6 @@ except Exception:
     install_kb_audit = None
 
 
-# --- ЗМІНА: Функція для видалення меню команд ---
 async def set_main_menu(bot: Bot):
     """
     Встановлює головне меню (команди) для бота.
@@ -47,7 +49,7 @@ async def main():
     Головна асинхронна функція для ініціалізації та запуску бота.
     """
     log_format = (
-        "%(asctime)s - %(levelname)s - "
+        "% (asctime)s - %(levelname)s - "
         "[User:%(user_id)s | Update:%(update_id)s] - "
         "%(name)s - %(message)s"
     )
@@ -75,8 +77,6 @@ async def main():
         sys.exit(1)
 
     # --- Створення схеми БД (автоматично при першому запуску) ---
-    # Використовуємо синхронний engine для створення таблиць. Якщо таблиць ще немає,
-    # ensure_schema створить їх. В іншому випадку виклик буде безпечним.
     try:
         ensure_schema(sync_engine)
         logger.info("Схема БД перевірена/створена автоматично.")
@@ -101,19 +101,16 @@ async def main():
         except Exception:
             logger.warning("KB-guard недоступний для aiogram 3.x, пропускаю.")
 
-    # --- Реєстрація твоїх наявних роутерів (без змін) ---
+    # --- Реєстрація існуючих роутерів ---
     dp.include_router(error_handler.router)
     dp.include_router(admin_core.router)
 
-    # --- Підключення адмінських модулів під aiogram 2.x ---
-    # Ці модулі не мають атрибута `router`, а натомість надають функцію `register(dp)`. Викликаємо її
-    # замість включення неіснуючого роутера.  Після переходу на aiogram 3.x ці функції можна буде
-    # замінити на dp.include_router(admin_import.router) та інші.
+    # Підключаємо модулі 2.x з функцією register(dp)
     admin_import.register(dp)
     admin_reports.register(dp)
     admin_subtract.register(dp)
 
-    # Модулі, які вже мають роутери v3
+    # Модулі з роутерами v3
     dp.include_router(admin_archive.router)
     dp.include_router(photo_admin.router)
     dp.include_router(common.router)
@@ -125,26 +122,21 @@ async def main():
     dp.include_router(user_search.router)
     dp.include_router(product_bridge.router)
 
-    # --- Нове: Router для кешованих карток і швидкого додавання ---
+    # Нове: Реєструємо експортні хендлери адмінки
+    dp.include_router(admin_export_router)
+
+    # Кешовані картки та швидке додавання
     cache_router = Router(name="cached_cards")
-
-    # Відкрити картку з кешу: callback_data -> "open:<dept_id>:<article>"
     cache_router.callback_query.register(open_product, F.data.startswith("open:"))
-
-    # Додати фіксовану кількість (з алокацією та «надлишками»):
-    # callback_data -> "add:<dept_id>:<article>:<N>"
     cache_router.callback_query.register(add_fixed, F.data.startswith("add:"))
-
     dp.include_router(cache_router)
 
     # Старт поллінгу
     try:
         await set_main_menu(bot)
         await bot.delete_webhook(drop_pending_updates=True)
-
         logger.info("Бот запускається...")
         await dp.start_polling(bot)
-
     except Exception as e:
         logger.critical("Критична помилка під час роботи бота: %s", e, exc_info=True)
     finally:

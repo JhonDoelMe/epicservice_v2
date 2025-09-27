@@ -122,13 +122,17 @@ def orm_get_all_collected_items_sync() -> list[dict]:
             product_info = all_products[article]
             
             if article in collected_data:
+                # If we've already seen this article, accumulate the quantity only.
                 collected_data[article]["quantity"] += item.quantity
             else:
+                # Store a new entry for this article. Preserve department, name and group.
+                # We also include the article itself so downstream reports can include it.
                 collected_data[article] = {
                     "department": product_info.відділ,
                     "group": product_info.група,
                     "name": product_info.назва,
                     "quantity": item.quantity,
+                    "article": article,
                 }
         
         return list(collected_data.values())
