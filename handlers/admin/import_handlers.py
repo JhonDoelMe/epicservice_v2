@@ -488,7 +488,7 @@ async def cb_import_products_start(cb: types.CallbackQuery) -> None:
     # Inline keyboard with a 'back to admin panel' button
     kb = InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton("⬅️ Назад", callback_data="admin:main")]
+            [InlineKeyboardButton(text="⬅️ Назад", callback_data="admin:main")]
         ]
     )
 
