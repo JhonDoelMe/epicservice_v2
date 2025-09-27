@@ -1,28 +1,28 @@
 # -*- coding: utf-8 -*-
 """
-Хендлери для операції «📉 Відняти зібране».
+Хендлери для операції «📉 Відняти зібране» (адаптовані під aiogram 3.x).
 
 Функціонал:
-- Приймає від адміна або менеджера текст зі списком позицій для списання.
-- Формати рядків:
-    1) "артикул, кількість"               → напр. "12345678, 3"
-    2) "назва..." де на початку є 8 цифр  → напр. "12345678 Носки чорні L, 2"
-- Кожен рядок окремо, порожні і коментарні (# ...) ігноруються.
-- Для кожної позиції:
-    - Блокує товар у БД (SELECT ... FOR UPDATE SKIP LOCKED)
-    - Зменшує qty на запитану кількість, але не нижче 0
-    - Пише підсумковий звіт (скільки було, скільки знято, скільки стало)
-- Інвалідує кеш карток для зачеплених товарів (ProductCardCache).
-- В кінці надсилає короткий звіт по успішних і помилках.
+ - Приймає від адміна або менеджера текст зі списком позицій для списання.
+ - Формати рядків:
+     1) "артикул, кількість"               → напр. "12345678, 3"
+     2) "назва..." де на початку є 8 цифр  → напр. "12345678 Носки чорні L, 2"
+ - Кожен рядок окремо, порожні і коментарні (# ...) ігноруються.
+ - Для кожної позиції:
+     - Блокує товар у БД (SELECT ... FOR UPDATE SKIP LOCKED)
+     - Зменшує qty на запитану кількість, але не нижче 0
+     - Пише підсумковий звіт (скільки було, скільки знято, скільки стало)
+ - Інвалідує кеш карток для зачеплених товарів (ProductCardCache).
+ - В кінці надсилає короткий звіт по успішних і помилках.
 
 Налаштування через .env:
-- SUBTRACT_ALLOWED_ROLES: "admin,manager" (за замовчуванням) — хто має право.
-- DEPT_DEFAULT: відділ за замовчуванням, якщо користувач його не вказує явно (опційно).
+ - SUBTRACT_ALLOWED_ROLES: "admin,manager" (за замовчуванням) — хто має право.
+ - DEPT_DEFAULT: відділ за замовчуванням, якщо користувач його не вказує явно (опційно).
 
 Залежності:
-- aiogram 2.x
-- SQLAlchemy ORM моделі: Product, ProductCardCache
-- фабрика сесій get_session()
+ - aiogram 3.x (Dispatcher імпортується з верхнього рівня `aiogram`)
+ - SQLAlchemy ORM моделі: Product, ProductCardCache
+ - фабрика сесій get_session()
 """
 
 from __future__ import annotations
@@ -32,8 +32,7 @@ import re
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 
-from aiogram import types
-from aiogram.dispatcher import Dispatcher
+from aiogram import types, Dispatcher
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from dotenv import load_dotenv
 from sqlalchemy import and_, text
@@ -47,7 +46,13 @@ try:
     from utils.kb_guard import safe_edit_or_send, require_kb  # type: ignore
 except Exception:  # pragma: no cover
     async def safe_edit_or_send(bot, chat_id, text, *, message_id=None, parse_mode=None, reply_markup=None, disable_web_page_preview=None):
-        return await bot.send_message(chat_id, text, parse_mode=parse_mode, reply_markup=reply_markup, disable_web_page_preview=disable_web_page_preview)
+        return await bot.send_message(
+            chat_id,
+            text,
+            parse_mode=parse_mode,
+            reply_markup=reply_markup,
+            disable_web_page_preview=disable_web_page_preview,
+        )
 
     def require_kb(fn):  # noqa
         return fn
@@ -66,6 +71,7 @@ MANAGER_IDS = set(int(x) for x in os.getenv("MANAGER_IDS", "").replace(" ", "").
 
 ARTICLE_RE = re.compile(r"^\s*(\d{8})\b")  # 8 цифр на початку
 LINE_SPLIT_RE = re.compile(r"[\r\n]+")
+
 
 @dataclass
 class SubtractItem:
@@ -154,7 +160,7 @@ def _invalidate_card_cache(session, dept_id: str, article: str) -> None:
     """Видалити кеш картки для вказаного товару (L2)."""
     session.query(ProductCardCache).filter(
         ProductCardCache.dept_id == str(dept_id),
-        ProductCardCache.article == str(article)
+        ProductCardCache.article == str(article),
     ).delete(synchronize_session=False)
 
 
@@ -166,17 +172,21 @@ def _subtract_one(session, dept_id: str, article: str, qty: float) -> Tuple[floa
     """
     # Явний блок рядка. SQLAlchemy Core текстом, щоб не залежати від діалекту.
     # Якщо у тебе PG — працює коректно.
-    lock_sql = text("""
+    lock_sql = text(
+        """
         SELECT id FROM products
         WHERE dept_id = :dept_id AND article = :article
         FOR UPDATE SKIP LOCKED
-    """)
+    """
+    )
     session.execute(lock_sql, {"dept_id": str(dept_id), "article": str(article)})
 
     # Отримати продукт
-    prod = session.query(Product).filter(
-        and_(Product.dept_id == str(dept_id), Product.article == str(article))
-    ).one_or_none()
+    prod = (
+        session.query(Product)
+        .filter(and_(Product.dept_id == str(dept_id), Product.article == str(article)))
+        .one_or_none()
+    )
 
     if not prod:
         raise ValueError("Товар не знайдено")
@@ -210,7 +220,11 @@ async def cmd_subtract_start(message: types.Message):
         await message.reply("⛔ У вас немає прав для списання.")
         return
 
-    dept_hint = f"Відділ за замовчуванням: <b>{DEPT_DEFAULT}</b>" if DEPT_DEFAULT else "Відділ не задано (буде потрібен у рядках)."
+    dept_hint = (
+        f"Відділ за замовчуванням: <b>{DEPT_DEFAULT}</b>"
+        if DEPT_DEFAULT
+        else "Відділ не задано (буде потрібен у рядках)."
+    )
     text = (
         "📉 <b>Відняти зібране</b>\n"
         f"{dept_hint}\n\n"
@@ -234,7 +248,10 @@ async def handle_subtract_payload(message: types.Message):
 
     items = parse_subtract_payload(message.text or "", DEPT_DEFAULT)
     if not items:
-        await message.reply("⚠️ Не знайшов жодної коректної позиції. Формат: <code>артикул, кількість</code> або <code>dept:артикул, кількість</code>.", parse_mode="HTML")
+        await message.reply(
+            "⚠️ Не знайшов жодної коректної позиції. Формат: <code>артикул, кількість</code> або <code>dept:артикул, кількість</code>.",
+            parse_mode="HTML",
+        )
         return
 
     # Агрегуємо однакові позиції для меншої кількості апдейтів
@@ -242,7 +259,10 @@ async def handle_subtract_payload(message: types.Message):
     for it in items:
         dept = str(it.dept_id or "").strip()
         if not dept:
-            await message.reply("⚠️ Не вказано відділ і немає DEPT_DEFAULT. Додайте у рядку формат <code>dept:артикул, кількість</code> або налаштуйте DEPT_DEFAULT.", parse_mode="HTML")
+            await message.reply(
+                "⚠️ Не вказано відділ і немає DEPT_DEFAULT. Додайте у рядку формат <code>dept:артикул, кількість</code> або налаштуйте DEPT_DEFAULT.",
+                parse_mode="HTML",
+            )
             return
         key = (dept, it.article)
         agg[key] = agg.get(key, 0.0) + float(it.qty)
@@ -261,12 +281,14 @@ async def handle_subtract_payload(message: types.Message):
                     results.append(f"• {dept}:{art}: {before:.2f} − {qty:.2f} → <b>{after:.2f}</b>")
                 except ValueError:
                     errors.append(f"• {dept}:{art}: товар не знайдено")
-                except Exception as e:
+                except Exception:
                     errors.append(f"• {dept}:{art}: помилка списання")
             s.commit()
     except Exception:
         # якщо щось критичне поза циклом
-        errors.append("Глобальна помилка транзакції. Частина позицій могла не застосуватись.")
+        errors.append(
+            "Глобальна помилка транзакції. Частина позицій могла не застосуватись."
+        )
 
     # Формуємо відповідь
     lines: List[str] = []
@@ -280,7 +302,9 @@ async def handle_subtract_payload(message: types.Message):
 
     # Якщо не було жодного успіху
     if not results and errors:
-        await message.answer("\n".join(lines), parse_mode="HTML", reply_markup=_kb_done())
+        await message.answer(
+            "\n".join(lines), parse_mode="HTML", reply_markup=_kb_done()
+        )
         return
 
     # Підсумок
@@ -289,7 +313,9 @@ async def handle_subtract_payload(message: types.Message):
     lines.append("")
     lines.append(f"Підсумок: успішно — <b>{ok_cnt}</b>, помилок — <b>{err_cnt}</b>.")
 
-    await message.answer("\n".join(lines), parse_mode="HTML", reply_markup=_kb_done())
+    await message.answer(
+        "\n".join(lines), parse_mode="HTML", reply_markup=_kb_done()
+    )
 
 
 # ------------------------------ Реєстрація ------------------------------------
@@ -303,4 +329,8 @@ def register(dp: Dispatcher) -> None:
     dp.register_message_handler(cmd_subtract_start, commands=["subtract", "minus"])
     # Будь-яке повідомлення після старту або в адмінському режимі можна ловити фільтром у твоїй логіці
     # Тут реєструємо загальний обробник тексту як приклад:
-    dp.register_message_handler(handle_subtract_payload, content_types=[types.ContentType.TEXT], regexp=r"^\s*(\d{8}|(\d{1,4}:\d{8}))\b.*,\s*[-+]?\d+([.,]\d+)?\s*$")
+    dp.register_message_handler(
+        handle_subtract_payload,
+        content_types=[types.ContentType.TEXT],
+        regexp=r"^\s*(\d{8}|(\d{1,4}:\d{8}))\b.*,\s*[-+]?\d+([.,]\d+)?\s*$",
+    )

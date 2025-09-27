@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
 Хендлери для роботи з картками товарів.
@@ -6,8 +7,7 @@
 
 from __future__ import annotations
 
-from aiogram import types
-from aiogram.dispatcher import Dispatcher
+from aiogram import types, Dispatcher  # Dispatcher imported from aiogram root for v3
 
 from database.session import get_session  # type: ignore
 from utils.card_cache import get_or_render_card

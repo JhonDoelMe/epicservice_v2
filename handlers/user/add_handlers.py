@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
 Додавання товару до списку користувача:
@@ -10,7 +11,7 @@
 - Інвалідуємо кеш картки після змін.
 
 Залежності:
-- aiogram 2.x
+- aiogram 3.x
 - SQLAlchemy ORM: Product, PicklistItem, PicklistOverflowItem
 - database.session.get_session()
 - utils.card_cache.invalidate
@@ -21,9 +22,9 @@ from __future__ import annotations
 import re
 from typing import Tuple
 
-from aiogram import types
-from aiogram.dispatcher import Dispatcher, FSMContext
-from aiogram.dispatcher.filters.state import State, StatesGroup
+from aiogram import types, Dispatcher
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import ForceReply
 from sqlalchemy import and_, text
 
@@ -158,7 +159,7 @@ async def add_custom_receive(message: types.Message, state: FSMContext):
     article = data.get("article")
 
     if not dept_id or not article:
-        await message.reply("Сесія втрачена. Спробуйте ще раз через кнопку «Інша к-сть».")
+        await message.reply("Сесія втрачена. Спробуйте ще раз через кнопку «Інша к‑сть».")
         await state.finish()
         return
 

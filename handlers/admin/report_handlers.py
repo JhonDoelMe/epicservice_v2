@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
 Адмінські звіти та експорт таблиць.
@@ -15,7 +16,7 @@
   але тут залишено хелпер на випадок адмінського формування.
 
 Залежності:
-- aiogram 2.x (для хендлерів)
+- aiogram 3.x (для хендлерів)
 - pandas
 - SQLAlchemy ORM: Product
 - utils.io_spreadsheet: write_table
@@ -31,8 +32,7 @@ from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Tuple
 
 import pandas as pd
-from aiogram import types
-from aiogram.dispatcher import Dispatcher
+from aiogram import types, Dispatcher  # Dispatcher imported from aiogram root
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from dotenv import load_dotenv
 from sqlalchemy import and_

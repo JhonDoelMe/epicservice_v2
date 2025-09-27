@@ -1,22 +1,23 @@
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Адмінські хендлери імпорту даних (Excel/ODS/CSV) із dry-run та підтвердженням.
+Адмінські хендлери імпорту даних (Excel/ODS/CSV) із dry‑run та підтвердженням.
 
 Функціонал:
 - Прийом файлу від адміністратора (xlsx/xlsm/ods/csv)
 - Нормалізація таблиці (utils/import_normalizer.py)
-- Dry-run: підрахунок доданих/оновлених/деактивованих, унікальних артикулів, сум по відділам
+- Dry‑run: підрахунок доданих/оновлених/деактивованих, унікальних артикулів, сум по відділам
 - Запобіжник: якщо у файлі не виявлено ЖОДНОГО артикула — імпорт скасовується, БД не чіпається
 - Поріг «масової деактивації» (відносний) з .env; якщо перевищено — деактивацію не виконуємо (тільки додаємо/оновлюємо)
-- Підтвердження імпорту через inline-клавіатуру
+- Підтвердження імпорту через inline‑клавіатуру
 - Звіт після застосування
 
 Залежності:
-- aiogram 2.x
+- aiogram 3.x
 - pandas
 - utils.io_spreadsheet
 - utils.import_normalizer
-- python-dotenv (для читання порогів з .env)
+- python‑dotenv (для читання порогів з .env)
 
 ІНТЕГРАЦІЯ З ORM:
 - ПРИПУЩЕНО, що існує модель Product з полями:
@@ -32,9 +33,9 @@
   Якщо у тебе інші імпорти — заміни секцію "ORM І СЕСІЇ" нижче.
 
 Примітка:
-- Обробник приймає будь-який документ від адміна (з підтримуваним розширенням).
+- Обробник приймає будь‑який документ від адміна (з підтримуваним розширенням).
 - Оригінальний файл зберігається у ./imports/
-- План dry-run зберігається у ./imports/_plans/<token>.json, застосування відбувається за callback'ом.
+- План dry‑run зберігається у ./imports/_plans/<token>.json, застосування відбувається за callback'ом.
 """
 
 from __future__ import annotations
@@ -48,8 +49,8 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 import pandas as pd
-from aiogram import Bot, types
-from aiogram.dispatcher import Dispatcher, filters
+from aiogram import Bot, types, Dispatcher  # Dispatcher imported from aiogram root in v3
+from aiogram.dispatcher import filters
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from dotenv import load_dotenv
 
@@ -188,8 +189,8 @@ def _load_plan(token: str) -> ImportPlan:
 
 
 def _humanize_report(stats: Dict[str, float],
-                     ins: int, upd: int, deact: int, deact_allowed: bool,
-                     per_dept: Dict[str, Dict[str, float]]) -> str:
+                      ins: int, upd: int, deact: int, deact_allowed: bool,
+                      per_dept: Dict[str, Dict[str, float]]) -> str:
     lines = []
     lines.append("📥 <b>Dry-run імпорту</b>")
     lines.append("")
@@ -334,7 +335,7 @@ async def _handle_import_file(message: types.Message, bot: Bot) -> None:
     try:
         raw_df = read_any_spreadsheet(saved_path)
         norm = normalize_import_table(raw_df).require_any_articles()
-    except NoArticlesError as e:
+    except NoArticlesError:
         await message.answer("⚠️ Імпорт скасовано: не знайдено жодного артикула у файлі.\n"
                              "Базу не змінено.")
         logger.warning("Import canceled: no articles.")
@@ -376,7 +377,7 @@ async def _cb_apply_import(cb: types.CallbackQuery) -> None:
     try:
         plan = _load_plan(token)
     except Exception:
-        await cb.answer("План не знайдено або застарів.", show_alert=True)
+        await cb.answer("План імпорту не знайдено або застарів.", show_alert=True)
         return
 
     # Застосування плану
