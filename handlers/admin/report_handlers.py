@@ -1,280 +1,293 @@
-# epicservice/handlers/admin/report_handlers.py
+# -*- coding: utf-8 -*-
+"""
+Адмінські звіти та експорт таблиць.
 
-import asyncio
-import logging
+Функціонал:
+- Звіти по відділах:
+    • кількість УНІКАЛЬНИХ артикулів
+    • сумарна кількість (шт) та оціночна сума (qty * price), за бажанням
+    • середня/медіанна ціна (опційно)
+- Експорт у .xlsx/.ods/.csv з єдиним API.
+- Іменування файлів:
+    report_<тип>_<dept|all>_<ДД.ММ.РРРР_ГГ.ММ>.<ext>
+- Ретеншн: підчищення старих файлів з каталогу exports/.
+- Експорт користувацьких списків і «надлишків» використовують інший модуль,
+  але тут залишено хелпер на випадок адмінського формування.
+
+Залежності:
+- aiogram 2.x (для хендлерів)
+- pandas
+- SQLAlchemy ORM: Product
+- utils.io_spreadsheet: write_table
+- python-dotenv
+"""
+
+from __future__ import annotations
+
 import os
-import re
-from datetime import datetime
-from typing import Optional
+import time
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Dict, Iterable, List, Optional, Tuple
 
 import pandas as pd
-from aiogram import Bot, F, Router
-from aiogram.fsm.context import FSMContext
-from aiogram.fsm.state import State, StatesGroup
-# --- ЗМІНА: Імпортуємо StorageKey ---
-from aiogram.fsm.storage.base import StorageKey
-from aiogram.types import (CallbackQuery, FSInputFile, InlineKeyboardButton,
-                           InlineKeyboardMarkup, Message)
-from sqlalchemy.exc import SQLAlchemyError
+from aiogram import types
+from aiogram.dispatcher import Dispatcher
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+from dotenv import load_dotenv
+from sqlalchemy import and_
 
-from config import ADMIN_IDS, ARCHIVES_PATH
-from database.orm import (orm_get_all_collected_items_sync,
-                          orm_get_all_products_sync,
-                          orm_get_all_temp_list_items_sync,
-                          orm_get_users_with_active_lists,
-                          orm_subtract_collected)
-from handlers.admin.core import _show_admin_panel
-from keyboards.inline import get_admin_lock_kb
-from lexicon.lexicon import LEXICON
-from utils.force_save_helper import force_save_user_list
+from database.orm.products import Product  # type: ignore
+from database.session import get_session  # type: ignore
 
-# Налаштовуємо логер
-logger = logging.getLogger(__name__)
+from utils.io_spreadsheet import write_table
 
-# Створюємо роутер
-router = Router()
-router.message.filter(F.from_user.id.in_(ADMIN_IDS))
-router.callback_query.filter(F.from_user.id.in_(ADMIN_IDS))
+load_dotenv(override=True)
 
+# ------------------------------ Конфіг ---------------------------------------
 
-class AdminReportStates(StatesGroup):
-    waiting_for_subtract_file = State()
-    lock_confirmation = State()
+EXPORTS_DIR = Path(os.getenv("EXPORTS_DIR", "exports")).resolve()
+EXPORTS_DIR.mkdir(parents=True, exist_ok=True)
+
+# Ретеншн у днях (0 або від’ємне — не чистити)
+EXPORTS_RETENTION_DAYS = int(os.getenv("EXPORTS_RETENTION_DAYS", "30") or 0)
+
+# Дозволені формати експорту
+ALLOWED_EXPORT_EXT = ("xlsx", "ods", "csv")
+
+# Хто може викликати звіти (якщо логіка прав спрощена)
+ADMIN_IDS = set(int(x) for x in os.getenv("ADMIN_IDS", "").replace(" ", "").split(",") if x.strip().isdigit())
 
 
-def _create_stock_report_sync() -> Optional[str]:
-    try:
-        products = orm_get_all_products_sync()
-        temp_list_items = orm_get_all_temp_list_items_sync()
-        
-        temp_reservations = {}
-        for item in temp_list_items:
-            temp_reservations[item.product_id] = temp_reservations.get(item.product_id, 0) + item.quantity
+# ------------------------------ Хелпери --------------------------------------
 
-        report_data = []
-        for product in products:
-            try:
-                stock_qty = float(str(product.кількість).replace(',', '.'))
-            except (ValueError, TypeError):
-                stock_qty = 0
-            
-            reserved = (product.відкладено or 0) + temp_reservations.get(product.id, 0)
-            available = stock_qty - reserved
-            
-            available_sum = available * (product.ціна or 0.0)
-
-            report_data.append({
-                "Відділ": product.відділ,
-                "Група": product.група,
-                "Назва": product.назва,
-                "Залишок (кількість)": int(available) if available == int(available) else available,
-                "Сума залишку (грн)": round(available_sum, 2)
-            })
-            
-        df = pd.DataFrame(report_data)
-        os.makedirs(ARCHIVES_PATH, exist_ok=True)
-        report_path = os.path.join(ARCHIVES_PATH, f"stock_report_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx")
-        df.to_excel(report_path, index=False)
-        return report_path
-    except Exception as e:
-        logger.error("Помилка створення звіту про залишки: %s", e, exc_info=True)
-        return None
+def _ts_str() -> str:
+    return time.strftime("%d.%m.%Y_%H.%M")
 
 
-def _parse_and_validate_subtract_file(df: pd.DataFrame) -> Optional[pd.DataFrame]:
-    try:
-        df_columns_lower = {str(c).lower() for c in df.columns}
-        if {"назва", "кількість"}.issubset(df_columns_lower):
-            df.rename(columns={col: str(col).lower() for col in df.columns}, inplace=True)
-            df_prepared = df[['назва', 'кількість']].copy()
-            df_prepared['артикул'] = df_prepared['назва'].astype(str).str.extract(r'(\d{8,})')
-            df_prepared = df_prepared.dropna(subset=['артикул'])
-            if pd.to_numeric(df_prepared['кількість'], errors='coerce').notna().all():
-                return df_prepared[['артикул', 'кількість']]
-
-        if len(df.columns) == 2:
-            header_as_data = pd.DataFrame([df.columns.values], columns=['артикул', 'кількість'])
-            df.columns = ['артикул', 'кількість']
-            df_simple = pd.concat([header_as_data, df], ignore_index=True)
-            
-            if pd.to_numeric(df_simple['артикул'], errors='coerce').notna().all() and \
-               pd.to_numeric(df_simple['кількість'], errors='coerce').notna().all():
-                return df_simple[['артикул', 'кількість']]
-    except Exception as e:
-        logger.error(f"Помилка парсингу файлу для віднімання: {e}")
-
-    return None
+def _ensure_ext(ext: str) -> str:
+    e = ext.lower().lstrip(".")
+    if e not in ALLOWED_EXPORT_EXT:
+        return "xlsx"
+    return e
 
 
-async def proceed_with_stock_export(callback: CallbackQuery, bot: Bot, state: FSMContext):
-    await callback.answer(LEXICON.EXPORTING_STOCK)
-    await callback.message.edit_text("Формую звіт по залишкам...", reply_markup=None)
-    
-    loop = asyncio.get_running_loop()
-    report_path = await loop.run_in_executor(None, _create_stock_report_sync)
-    
-    await callback.message.delete()
+def _report_filename(kind: str, dept: Optional[str], ext: str) -> Path:
+    """
+    report_<тип>_<dept|all>_<ДД.ММ.РРРР_ГГ.ММ>.<ext>
+    kind: "unique", "stock", "inactive", "all_departments" і т.п.
+    """
+    tag = str(dept) if dept else "all"
+    name = f"report_{kind}_{tag}_{_ts_str()}.{_ensure_ext(ext)}"
+    return EXPORTS_DIR / name
 
-    if not report_path:
-        await bot.send_message(callback.from_user.id, LEXICON.STOCK_REPORT_ERROR)
+
+def _cleanup_old_exports(retention_days: int = EXPORTS_RETENTION_DAYS) -> int:
+    """
+    Видалити файли старше retention_days з каталогу exports/.
+    Повертає кількість видалених файлів.
+    """
+    if retention_days <= 0:
+        return 0
+    import datetime as dt
+    now = dt.datetime.now()
+    removed = 0
+    for p in EXPORTS_DIR.glob("*.*"):
+        try:
+            mtime = dt.datetime.fromtimestamp(p.stat().st_mtime)
+            if (now - mtime).days > retention_days:
+                p.unlink(missing_ok=True)
+                removed += 1
+        except Exception:
+            # не критично
+            pass
+    return removed
+
+
+def _df_unique_articles(products: Iterable[Product]) -> pd.DataFrame:
+    """
+    Повертає DataFrame з унікальними артикулами (dept_id, article, name, qty, price, sum).
+    Кількість унікальних артикулів рахується по (dept_id, article).
+    """
+    rows: List[Dict[str, object]] = []
+    for p in products:
+        qty = float(getattr(p, "qty", 0.0) or 0.0)
+        price = float(getattr(p, "price", 0.0) or 0.0)
+        rows.append({
+            "відділ": str(getattr(p, "dept_id")),
+            "артикул": str(getattr(p, "article")),
+            "назва": str(getattr(p, "name") or ""),
+            "кількість": qty,
+            "ціна": price,
+            "сума": qty * price,
+            "активний": bool(getattr(p, "active", True)),
+            "місяців без руху": float(getattr(p, "months_no_move", 0.0) or 0.0),
+        })
+    df = pd.DataFrame(rows)
+    if df.empty:
+        return pd.DataFrame(columns=["відділ", "артикул", "назва", "кількість", "ціна", "сума", "активний", "місяців без руху"])
+    return df
+
+
+def _per_dept_summary(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Зведення по відділах:
+      • унікальних артикулів
+      • загальна кількість (шт)
+      • загальна сума
+      • середня ціна (зважена по кількості, якщо можливо)
+    """
+    if df.empty:
+        return pd.DataFrame(columns=["відділ", "унікальних артикулів", "шт (∑)", "сума (∑)", "середня ціна"])
+    grp = df.groupby("відділ", dropna=False)
+
+    def _weighted_avg_price(g: pd.DataFrame) -> float:
+        qty = g.get("кількість")
+        price = g.get("ціна")
+        if qty is None or price is None or qty.fillna(0).sum() == 0:
+            return float(price.fillna(0).mean()) if price is not None else 0.0
+        return float((price.fillna(0) * qty.fillna(0)).sum() / qty.fillna(0).sum())
+
+    res = pd.DataFrame({
+        "унікальних артикулів": grp["артикул"].nunique(),
+        "шт (∑)": grp["кількість"].sum(min_count=1),
+        "сума (∑)": grp["сума"].sum(min_count=1)
+    }).reset_index()
+
+    # Середня ціна окремо
+    avg_rows = []
+    for dept, g in grp:
+        avg_rows.append({"відділ": dept, "середня ціна": _weighted_avg_price(g)})
+    avg_df = pd.DataFrame(avg_rows)
+
+    out = pd.merge(res, avg_df, on="відділ", how="left")
+    # Приведення форматів
+    for c in ["шт (∑)", "сума (∑)", "середня ціна"]:
+        if c in out.columns:
+            out[c] = out[c].fillna(0.0).astype(float)
+    return out.sort_values(by="відділ")
+
+
+# ------------------------------ Основні API ----------------------------------
+
+@dataclass
+class ReportOptions:
+    """Опції звітів."""
+    dept_id: Optional[str] = None       # якщо None — всі відділи
+    include_inactive: bool = False      # включати неактивні
+    fmt: str = "xlsx"                   # "xlsx" | "ods" | "csv"
+    kind: str = "unique"                # тип звіту для імені файлу
+    sheet_name: str = "Звіт"            # ім'я аркуша для Excel/ODS
+
+
+def build_products_df(opts: ReportOptions) -> pd.DataFrame:
+    """
+    Витягти дані з БД під звіт.
+    """
+    with get_session() as s:
+        q = s.query(Product)
+        if opts.dept_id:
+            q = q.filter(Product.dept_id == str(opts.dept_id))
+        if not opts.include_inactive:
+            q = q.filter(Product.active == True)  # noqa: E712
+        products = q.all()  # type: ignore
+    return _df_unique_articles(products)
+
+
+def build_summary_df(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Побудувати зведення по відділах на основі переліку товарів.
+    """
+    return _per_dept_summary(df)
+
+
+def export_report(opts: ReportOptions) -> Path:
+    """
+    Побудувати звіт і записати його у файл у каталозі exports/.
+    Повертає шлях до створеного файла.
+    """
+    df = build_products_df(opts)
+    summary = build_summary_df(df)
+
+    # Якщо конкретний відділ — робимо один аркуш
+    # Якщо всі відділи — можемо записати два аркуші: "Перелік", "Зведення"
+    path = _report_filename(opts.kind, opts.dept_id or None, opts.fmt)
+
+    if opts.fmt.lower() in ("xlsx", "ods"):
+        # Для простоти збережемо лише один аркуш. Якщо потрібно — можна зробити мульти-аркуші.
+        # Тепер: якщо summary не пусте, пишемо саме summary. Інакше — повний перелік.
+        df_to_write = summary if not summary.empty else df
+        write_table(df_to_write, path, fmt=opts.fmt, sheet_name=opts.sheet_name, index=False)
     else:
-        try:
-            await bot.send_document(
-                chat_id=callback.from_user.id,
-                document=FSInputFile(report_path),
-                caption=LEXICON.STOCK_REPORT_CAPTION
-            )
-        finally:
-            if os.path.exists(report_path): os.remove(report_path)
-    
-    await _show_admin_panel(callback, state, bot)
+        # CSV — тільки один набір даних
+        df_to_write = summary if not summary.empty else df
+        write_table(df_to_write, path, fmt="csv", index=False)
+
+    # Ретеншн
+    _cleanup_old_exports()
+    return path
 
 
-async def proceed_with_collected_export(callback: CallbackQuery, bot: Bot, state: FSMContext):
-    await callback.answer(LEXICON.COLLECTED_REPORT_PROCESSING)
-    await callback.message.edit_text("Формую зведений звіт...", reply_markup=None)
-    
-    loop = asyncio.get_running_loop()
+# ------------------------------ Хендлери TG ----------------------------------
+
+def _kb_reports_main(dept: Optional[str]) -> InlineKeyboardMarkup:
+    kb = InlineKeyboardMarkup(row_width=2)
+    tag = dept or "all"
+    kb.add(
+        InlineKeyboardButton("🔢 Унікальні артикули", callback_data=f"rep:unique:{tag}"),
+        InlineKeyboardButton("📦 Залишки і сума", callback_data=f"rep:stock:{tag}"),
+    )
+    kb.add(
+        InlineKeyboardButton("🗂 Усі відділи (зведення)", callback_data="rep:unique:all"),
+    )
+    return kb
+
+
+async def cmd_reports_start(message: types.Message):
+    """
+    Стартова точка меню звітів. Якщо твоє меню інше — підключиш ці хендлери туди.
+    """
+    user_id = message.from_user.id
+    if ADMIN_IDS and user_id not in ADMIN_IDS:
+        await message.reply("⛔ Немає прав для перегляду звітів.")
+        return
+
+    text = "📊 Оберіть звіт і відділ (або «усі відділи»)."
+    await message.answer(text, reply_markup=_kb_reports_main(dept=None))
+
+
+async def _run_and_send_report(message: types.Message, kind: str, dept_tag: str, fmt: str = "xlsx"):
+    """
+    Виконати генерацію звіту і відправити файл.
+    """
+    dept = None if dept_tag == "all" else dept_tag
+    opts = ReportOptions(dept_id=dept, include_inactive=False, fmt=fmt, kind=kind,
+                         sheet_name="Звіт")
+    path = export_report(opts)
+    await message.answer_document(types.InputFile(str(path)), caption=f"Звіт «{kind}», відділ: {dept or 'усі'}")
+
+
+async def cb_report_menu(cb: types.CallbackQuery):
+    """
+    Обробка натискань на кнопки звітів.
+    Формат callback_data: rep:<kind>:<dept|all>
+    """
     try:
-        collected_items = await loop.run_in_executor(None, orm_get_all_collected_items_sync)
-        await callback.message.delete()
-        
-        if not collected_items:
-            await bot.send_message(callback.from_user.id, LEXICON.COLLECTED_REPORT_EMPTY)
-        else:
-            df = pd.DataFrame(collected_items)
-            df.rename(
-                columns={"department": "Відділ", "group": "Група", "name": "Назва", "quantity": "Кількість"},
-                inplace=True
-            )
-            os.makedirs(ARCHIVES_PATH, exist_ok=True)
-            report_path = os.path.join(ARCHIVES_PATH, f"collected_report_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx")
-            df.to_excel(report_path, index=False)
-            await bot.send_document(
-                chat_id=callback.from_user.id,
-                document=FSInputFile(report_path),
-                caption=LEXICON.COLLECTED_REPORT_CAPTION
-            )
-            os.remove(report_path)
-        
-        await _show_admin_panel(callback, state, bot)
-    except Exception as e:
-        logger.error("Помилка створення зведеного звіту: %s", e, exc_info=True)
-        await bot.send_message(callback.from_user.id, LEXICON.UNEXPECTED_ERROR)
-
-
-@router.callback_query(F.data == "admin:export_stock")
-async def export_stock_handler(callback: CallbackQuery, state: FSMContext, bot: Bot):
-    active_users = await orm_get_users_with_active_lists()
-    if not active_users:
-        await proceed_with_stock_export(callback, bot, state)
+        _, kind, dept_tag = cb.data.split(":", 2)
+    except Exception:
+        await cb.answer("Невірний запит", show_alert=True)
         return
-    users_info = "\n".join([f"- Користувач `{user_id}` (позицій: {count})" for user_id, count in active_users])
-    await state.update_data(action_to_perform='export_stock', locked_user_ids=[uid for uid, _ in active_users])
-    await state.set_state(AdminReportStates.lock_confirmation)
-    await callback.message.edit_text(LEXICON.ACTIVE_LISTS_BLOCK.format(users_info=users_info), reply_markup=get_admin_lock_kb('export_stock'))
-    await callback.answer("Дію заблоковано", show_alert=True)
+
+    await cb.answer()
+    # За замовчуванням формуємо .xlsx
+    await _run_and_send_report(cb.message, kind, dept_tag, fmt="xlsx")
 
 
-@router.callback_query(F.data == "admin:export_collected")
-async def export_collected_handler(callback: CallbackQuery, state: FSMContext, bot: Bot):
-    active_users = await orm_get_users_with_active_lists()
-    if not active_users:
-        await proceed_with_collected_export(callback, bot, state)
-        return
-    users_info = "\n".join([f"- Користувач `{user_id}` (позицій: {count})" for user_id, count in active_users])
-    await state.update_data(action_to_perform='export_collected', locked_user_ids=[uid for uid, _ in active_users])
-    await state.set_state(AdminReportStates.lock_confirmation)
-    await callback.message.edit_text(LEXICON.ACTIVE_LISTS_BLOCK.format(users_info=users_info), reply_markup=get_admin_lock_kb('export_collected'))
-    await callback.answer("Дію заблоковано", show_alert=True)
+# ------------------------------ Реєстрація ------------------------------------
 
-
-@router.callback_query(AdminReportStates.lock_confirmation, F.data.startswith("lock:notify:"))
-async def handle_report_lock_notify(callback: CallbackQuery, state: FSMContext, bot: Bot):
-    data = await state.get_data()
-    for user_id in data.get('locked_user_ids', []):
-        try:
-            await bot.send_message(user_id, LEXICON.USER_SAVE_LIST_NOTIFICATION)
-        except Exception as e:
-            logger.warning("Не вдалося надіслати сповіщення користувачу %s: %s", user_id, e)
-    await callback.answer(LEXICON.NOTIFICATIONS_SENT, show_alert=True)
-
-
-@router.callback_query(AdminReportStates.lock_confirmation, F.data.startswith("lock:force_save:"))
-async def handle_report_lock_force_save(callback: CallbackQuery, state: FSMContext, bot: Bot):
-    await callback.message.edit_text("Почав примусове збереження списків...")
-    data = await state.get_data()
-    user_ids, action = data.get('locked_user_ids', []), data.get('action_to_perform')
-    
-    # --- ВИПРАВЛЕНО: Створюємо коректний FSMContext для кожного користувача ---
-    results = []
-    for user_id in user_ids:
-        user_state_key = StorageKey(bot_id=bot.id, chat_id=user_id, user_id=user_id)
-        user_state = FSMContext(storage=state.storage, key=user_state_key)
-        results.append(await force_save_user_list(user_id, bot, user_state))
-    
-    all_saved_successfully = all(results)
-    
-    if not all_saved_successfully:
-        await callback.message.edit_text("Під час примусового збереження виникли помилки. Спробуйте пізніше.")
-        await state.set_state(None)
-        return
-    await callback.answer("Всі списки успішно збережено!", show_alert=True)
-    if action == 'export_stock':
-        await proceed_with_stock_export(callback, bot, state)
-    elif action == 'export_collected':
-        await proceed_with_collected_export(callback, bot, state)
-    await state.set_state(None)
-
-
-@router.callback_query(F.data == "admin:subtract_collected")
-async def start_subtract_handler(callback: CallbackQuery, state: FSMContext):
-    back_kb = InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(
-            text=LEXICON.BUTTON_BACK_TO_ADMIN_PANEL,
-            callback_data="admin:main"
-        )
-    ]])
-    await callback.message.edit_text(LEXICON.SUBTRACT_PROMPT, reply_markup=back_kb)
-    await state.set_state(AdminReportStates.waiting_for_subtract_file)
-    await state.update_data(main_message_id=callback.message.message_id)
-    await callback.answer()
-
-
-@router.message(AdminReportStates.waiting_for_subtract_file, F.document)
-async def process_subtract_file(message: Message, state: FSMContext, bot: Bot):
-    data = await state.get_data()
-    await bot.delete_message(message.chat.id, data.get("main_message_id"))
-    await state.clear()
-    
-    await message.answer(LEXICON.SUBTRACT_PROCESSING)
-    temp_file_path = f"temp_subtract_{message.from_user.id}.tmp"
-    
-    try:
-        await bot.download(message.document, destination=temp_file_path)
-        df = await asyncio.to_thread(pd.read_excel, temp_file_path)
-        
-        standardized_df = _parse_and_validate_subtract_file(df)
-        
-        if standardized_df is None:
-            await message.answer(LEXICON.SUBTRACT_INVALID_COLUMNS)
-        else:
-            result = await orm_subtract_collected(standardized_df)
-            report_text = "\n".join([
-                LEXICON.SUBTRACT_REPORT_TITLE,
-                LEXICON.SUBTRACT_REPORT_PROCESSED.format(processed=result['processed']),
-                LEXICON.SUBTRACT_REPORT_NOT_FOUND.format(not_found=result['not_found']),
-                LEXICON.SUBTRACT_REPORT_ERROR.format(errors=result['errors']),
-            ])
-            await message.answer(report_text)
-            
-    except SQLAlchemyError as e:
-        logger.critical("Помилка БД під час віднімання залишків: %s", e, exc_info=True)
-        await message.answer(LEXICON.IMPORT_SYNC_ERROR.format(error=str(e)))
-    except Exception as e:
-        logger.error("Помилка обробки файлу для віднімання: %s", e, exc_info=True)
-        await message.answer(LEXICON.IMPORT_CRITICAL_READ_ERROR.format(error=str(e)))
-    finally:
-        if os.path.exists(temp_file_path):
-            os.remove(temp_file_path)
-        await _show_admin_panel(message, state, bot)
+def register(dp: Dispatcher) -> None:
+    """
+    Підключення хендлерів звітів.
+    """
+    dp.register_message_handler(cmd_reports_start, commands=["reports", "report"])
+    dp.register_callback_query_handler(cb_report_menu, lambda c: c.data and c.data.startswith("rep:"))

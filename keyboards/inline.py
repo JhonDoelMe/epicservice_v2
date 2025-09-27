@@ -28,6 +28,7 @@ def get_user_main_kb() -> InlineKeyboardMarkup:
         ]
     )
 
+
 def get_admin_main_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
@@ -56,6 +57,7 @@ def get_admin_main_kb() -> InlineKeyboardMarkup:
         ]
     )
 
+
 def get_admin_panel_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
@@ -68,6 +70,7 @@ def get_admin_panel_kb() -> InlineKeyboardMarkup:
             [InlineKeyboardButton(text=LEXICON.BUTTON_BACK_TO_MAIN_MENU, callback_data="main:back")]
         ]
     )
+
 
 def get_users_with_archives_kb(users: list) -> InlineKeyboardMarkup:
     keyboard = []
@@ -83,6 +86,7 @@ def get_users_with_archives_kb(users: list) -> InlineKeyboardMarkup:
         InlineKeyboardButton(text=LEXICON.BUTTON_BACK_TO_ADMIN_PANEL, callback_data="admin:main")
     ])
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
 
 def get_archive_kb(user_id: int, is_admin_view: bool = False) -> InlineKeyboardMarkup:
     keyboard = [[
@@ -100,6 +104,7 @@ def get_archive_kb(user_id: int, is_admin_view: bool = False) -> InlineKeyboardM
         
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
+
 def get_search_results_kb(products: list[Product]) -> InlineKeyboardMarkup:
     keyboard = []
     for product in products:
@@ -108,6 +113,7 @@ def get_search_results_kb(products: list[Product]) -> InlineKeyboardMarkup:
             InlineKeyboardButton(text=button_text, callback_data=f"product:{product.id}")
         ])
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
 
 def get_product_actions_kb(
     product_id: int,
@@ -154,7 +160,7 @@ def get_product_actions_kb(
 def get_quantity_selector_kb(product_id: int, current_qty: int, max_qty: int) -> InlineKeyboardMarkup:
     """
     Створює інтерактивну клавіатуру для вибору кількості товару.
-    Центральна кнопка тепер є і індикатором, і кнопкою підтвердження.
+    Центральна кнопка є індикатором і кнопкою підтвердження.
     """
     current_qty = max(1, current_qty)
 
@@ -164,7 +170,6 @@ def get_quantity_selector_kb(product_id: int, current_qty: int, max_qty: int) ->
                 text="➖",
                 callback_data=f"qty_update:{product_id}:minus:{current_qty}:{max_qty}"
             ),
-            # --- ЗМІНА: Центральна кнопка тепер підтверджує додавання ---
             InlineKeyboardButton(
                 text=f"✅ Додати {current_qty} шт.",
                 callback_data=f"add_confirm:{product_id}:{current_qty}"
@@ -196,6 +201,7 @@ def get_confirmation_kb(confirm_callback: str, cancel_callback: str) -> InlineKe
         ]]
     )
 
+
 def get_admin_lock_kb(action: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[[
@@ -210,6 +216,7 @@ def get_admin_lock_kb(action: str) -> InlineKeyboardMarkup:
         ]]
     )
 
+
 def get_notify_confirmation_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[[
@@ -223,6 +230,7 @@ def get_notify_confirmation_kb() -> InlineKeyboardMarkup:
             ),
         ]]
     )
+
 
 def get_my_list_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
@@ -244,6 +252,7 @@ def get_my_list_kb() -> InlineKeyboardMarkup:
         ]
     )
 
+
 def get_list_for_editing_kb(temp_list: list[TempList]) -> InlineKeyboardMarkup:
     keyboard = []
     for item in temp_list:
@@ -259,3 +268,31 @@ def get_list_for_editing_kb(temp_list: list[TempList]) -> InlineKeyboardMarkup:
         InlineKeyboardButton(text="✅ Завершити редагування", callback_data="edit_list:finish")
     ])
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+
+# ---------------------- Нове: клавіатура картки з кешем ----------------------
+
+def get_cached_product_kb(dept_id: str, article: str, can_add: bool) -> InlineKeyboardMarkup:
+    """
+    Клавіатура для картки, що відкривається через кеш (open:<dept_id>:<article>).
+    Callback-и узгоджені з новими хендлерами:
+      - open:<dept>:<article>
+      - add:<dept>:<article>:<n>
+      - add_custom:<dept>:<article>
+      - open_my_list/go_home як і раніше
+    """
+    kb = InlineKeyboardMarkup(row_width=2)
+
+    if can_add:
+        kb.add(
+            InlineKeyboardButton("➕ Додати 1", callback_data=f"add:{dept_id}:{article}:1"),
+            InlineKeyboardButton("➕➕ Додати 5", callback_data=f"add:{dept_id}:{article}:5"),
+        )
+
+    kb.add(
+        InlineKeyboardButton("✍️ Інша к-сть", callback_data=f"add_custom:{dept_id}:{article}"),
+        InlineKeyboardButton(LEXICON.INLINE_BUTTON_MY_LIST, callback_data="main:my_list"),
+    )
+
+    kb.add(InlineKeyboardButton(LEXICON.BUTTON_BACK_TO_MAIN_MENU, callback_data="main:back"))
+    return kb
