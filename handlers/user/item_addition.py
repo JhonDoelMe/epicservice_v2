@@ -30,7 +30,8 @@ async def _add_item_logic(user_id: int, product_id: int, quantity: int, bot: Bot
     """
     try:
         async with async_session() as session:
-            product = await orm_get_product_by_id(session, product_id)
+            # Corrected: pass product_id first, session as keyword
+            product = await orm_get_product_by_id(product_id, session=session)
             if not product:
                 if callback.id != "fake_callback": # Перевіряємо, чи callback справжній
                     await callback.answer(LEXICON.PRODUCT_NOT_FOUND, show_alert=True)
@@ -85,7 +86,8 @@ async def show_quantity_selector(callback: CallbackQuery, bot: Bot):
         user_id = callback.from_user.id
         
         async with async_session() as session:
-            product = await orm_get_product_by_id(session, product_id)
+            # Corrected: pass product_id first, session as keyword
+            product = await orm_get_product_by_id(product_id, session=session)
             if not product:
                 await callback.answer(LEXICON.PRODUCT_NOT_FOUND, show_alert=True)
                 return

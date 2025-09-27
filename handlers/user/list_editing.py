@@ -73,7 +73,8 @@ async def edit_item_handler(callback: CallbackQuery, state: FSMContext, bot: Bot
     try:
         product_id = int(callback.data.split(":", 1)[1])
         async with async_session() as session:
-            product = await orm_get_product_by_id(session, product_id)
+            # Corrected: pass product_id first, session as keyword
+            product = await orm_get_product_by_id(product_id, session=session)
             if not product:
                 await callback.answer(LEXICON.PRODUCT_NOT_FOUND, show_alert=True)
                 return

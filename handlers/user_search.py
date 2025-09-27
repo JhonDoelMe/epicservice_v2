@@ -93,7 +93,8 @@ async def show_product_from_button(callback: CallbackQuery, bot: Bot, state: FSM
         last_query = fsm_data.get('last_query')
         
         async with async_session() as session:
-            product = await orm_get_product_by_id(session, product_id)
+            # Corrected: pass product_id first, session as keyword
+            product = await orm_get_product_by_id(product_id, session=session)
             if product:
                 # Редагуємо повідомлення зі списком результатів, перетворюючи його на картку
                 sent_message = await send_or_edit_product_card(

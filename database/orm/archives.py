@@ -57,8 +57,9 @@ async def orm_update_reserved_quantity(session, items: list[dict]):
     from database.orm.products import orm_get_product_by_id
 
     for item in items:
+        # Corrected: pass product_id first, session as keyword
         product = await orm_get_product_by_id(
-            session, item["product_id"], for_update=True
+            item["product_id"], session=session, for_update=True
         )
         if product:
             product.відкладено = (product.відкладено or 0) + item["quantity"]

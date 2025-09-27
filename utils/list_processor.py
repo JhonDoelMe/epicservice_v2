@@ -82,7 +82,8 @@ async def process_and_save_list(
     # --- КІНЕЦЬ НОВОГО БЛОКУ ---
 
     for item in temp_list:
-        product = await orm_get_product_by_id(session, item.product_id, for_update=True)
+        # Corrected: pass product_id first, session as keyword
+        product = await orm_get_product_by_id(item.product_id, session=session, for_update=True)
         if not product:
             continue
 
