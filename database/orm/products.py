@@ -46,6 +46,13 @@ from sqlalchemy.orm import Session, declarative_base
 
 from database.engine import async_session, sync_session
 
+# NB: We import the canonical Product model from `database.models` to use in
+# user‑facing queries (search and retrieval). This model defines Ukrainian
+# field names such as ``артикул`` and ``назва`` and includes extra fields
+# like ``група`` and ``відкладено``. Using it in search/get functions
+# ensures that all user‑facing features receive full product details.
+from database.models import Product as ModelsProduct
+
 # Import the declarative base from database.models to include the User and other
 # shared models. Using this Base ensures that ``ensure_schema`` will create
 # tables defined in ``database/models.py`` as well as the ones defined below.
@@ -427,12 +434,16 @@ async def orm_find_products(
     # Формуємо фільтр: порівнюємо article та name незалежно від регістру
     pattern = f"%{search_query}%"
     async with async_session() as session:
-        stmt = select(Product).where(
-            or_(Product.article.ilike(pattern), Product.name.ilike(pattern))
+        # Пошук здійснюємо по українській моделі Products. Поля ``артикул`` та
+        # ``назва`` відповідають колонам article та name у базі, але
+        # забезпечують повну сумісність із рештою коду.
+        stmt = select(ModelsProduct).where(
+            or_(ModelsProduct.артикул.ilike(pattern), ModelsProduct.назва.ilike(pattern))
         )
         if dept_id:
-            stmt = stmt.where(Product.dept_id == dept_id)
-        stmt = stmt.order_by(Product.name.asc()).limit(limit)
+            stmt = stmt.where(ModelsProduct.відділ == dept_id)
+        # Сортуємо за назвою українською
+        stmt = stmt.order_by(ModelsProduct.назва.asc()).limit(limit)
         result = await session.execute(stmt)
         return list(result.scalars().unique())
 
@@ -456,15 +467,18 @@ async def orm_get_product_by_id(
     """
     need_own_session = session is None
     async_session_to_use = session or async_session()
+    # Ми отримуємо товар за допомогою української моделі Products, щоб
+    # повернути всі поля, включно з ``група`` та ``відкладено``. Якщо потрібне
+    # блокування для оновлення, додаємо SELECT FOR UPDATE.
     if need_own_session:
         async with async_session_to_use as local_session:
-            stmt = select(Product).where(Product.id == product_id)
+            stmt = select(ModelsProduct).where(ModelsProduct.id == product_id)
             if for_update:
                 stmt = stmt.with_for_update()
             res = await local_session.execute(stmt)
             return res.scalar_one_or_none()
     else:
-        stmt = select(Product).where(Product.id == product_id)
+        stmt = select(ModelsProduct).where(ModelsProduct.id == product_id)
         if for_update:
             stmt = stmt.with_for_update()
         res = await session.execute(stmt)
