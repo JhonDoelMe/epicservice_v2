@@ -51,7 +51,13 @@ from database.engine import async_session, sync_session
 # field names such as ``артикул`` and ``назва`` and includes extra fields
 # like ``група`` and ``відкладено``. Using it in search/get functions
 # ensures that all user‑facing features receive full product details.
-from database.models import Product as ModelsProduct
+# Note: We intentionally do not import the Product model from database.models
+# here because the PostgreSQL schema uses the English column names (article,
+# dept_id, name, etc.). Attempting to query using the Ukrainian model leads
+# to an UndefinedColumnError on columns like "артикул". The compatibility
+# properties defined on this class (кількість, назва, тощо) allow the rest
+# of the codebase to access fields using Ukrainian names while still storing
+# data in the English‑named columns.
 
 # Import the declarative base from database.models to include the User and other
 # shared models. Using this Base ensures that ``ensure_schema`` will create
@@ -159,16 +165,20 @@ class Product(Base):
         self.dept_id = value
 
     # --- Group / Група ---
+    # Зберігаємо назву групи у колонці `group_name`. Якщо колонки немає у
+    # базі, SQLAlchemy створить її при ініціалізації схеми. Це дозволяє
+    # заповнювати та зчитувати групу для кожного товару.
+    group_name = Column("group_name", String(100), nullable=True)
+
     @property
     def група(self) -> str:
-        # The English model has no explicit 'group' field; return an empty
-        # string to signal that no group is defined.
-        return ""
+        """Повертає назву групи або порожній рядок, якщо група не задана."""
+        return self.group_name or ""
 
     @група.setter
     def група(self, value: str) -> None:
-        # Ignore assignments to group as this model does not persist them.
-        pass
+        """Зберігає назву групи у полі `group_name`. Якщо передано None — ставимо None."""
+        self.group_name = value if value is not None else None
 
     # --- Quantity / Кількість ---
     @property
@@ -434,16 +444,13 @@ async def orm_find_products(
     # Формуємо фільтр: порівнюємо article та name незалежно від регістру
     pattern = f"%{search_query}%"
     async with async_session() as session:
-        # Пошук здійснюємо по українській моделі Products. Поля ``артикул`` та
-        # ``назва`` відповідають колонам article та name у базі, але
-        # забезпечують повну сумісність із рештою коду.
-        stmt = select(ModelsProduct).where(
-            or_(ModelsProduct.артикул.ilike(pattern), ModelsProduct.назва.ilike(pattern))
+        # Шукаємо у таблиці products за англомовними полями article та name.
+        stmt = select(Product).where(
+            or_(Product.article.ilike(pattern), Product.name.ilike(pattern))
         )
         if dept_id:
-            stmt = stmt.where(ModelsProduct.відділ == dept_id)
-        # Сортуємо за назвою українською
-        stmt = stmt.order_by(ModelsProduct.назва.asc()).limit(limit)
+            stmt = stmt.where(Product.dept_id == dept_id)
+        stmt = stmt.order_by(Product.name.asc()).limit(limit)
         result = await session.execute(stmt)
         return list(result.scalars().unique())
 
@@ -467,18 +474,19 @@ async def orm_get_product_by_id(
     """
     need_own_session = session is None
     async_session_to_use = session or async_session()
-    # Ми отримуємо товар за допомогою української моделі Products, щоб
-    # повернути всі поля, включно з ``група`` та ``відкладено``. Якщо потрібне
-    # блокування для оновлення, додаємо SELECT FOR UPDATE.
+    # Повертаємо товар, запитуючи англомовну таблицю products. Запити до
+    # української моделі не працюють, оскільки в таблиці products немає
+    # відповідних стовпців (наприклад, "артикул"). Властивості, визначені
+    # у класі ``Product`` нижче, надають доступ до українських полів.
     if need_own_session:
         async with async_session_to_use as local_session:
-            stmt = select(ModelsProduct).where(ModelsProduct.id == product_id)
+            stmt = select(Product).where(Product.id == product_id)
             if for_update:
                 stmt = stmt.with_for_update()
             res = await local_session.execute(stmt)
             return res.scalar_one_or_none()
     else:
-        stmt = select(ModelsProduct).where(ModelsProduct.id == product_id)
+        stmt = select(Product).where(Product.id == product_id)
         if for_update:
             stmt = stmt.with_for_update()
         res = await session.execute(stmt)

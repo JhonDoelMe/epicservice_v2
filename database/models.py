@@ -83,6 +83,11 @@ class Product(Base):
     # Кількість (колонка 'qty')
     кількість: Mapped[str] = mapped_column("qty", String(50))
 
+    # Група (колонка 'group_name')
+    group_name: Mapped[str] | None = mapped_column(
+        "group_name", String(100), nullable=True
+    )
+
     # Місяці без руху (колонка 'months_no_move')
     місяці_без_руху: Mapped[int] = mapped_column(
         "months_no_move", Integer, nullable=True, default=0
@@ -99,17 +104,18 @@ class Product(Base):
     )
 
     # ------------------------------------------------------------------
-    # Поля, що не зберігаються у таблиці, але потрібні для сумісності
+    # Поля, що не зберігаються у таблиці, або мають альтернативні назви,
+    # але потрібні для сумісності
 
     @property
     def група(self) -> str:
-        """Повертає порожній рядок, оскільки колонка для групи відсутня."""
-        return ""
+        """Повертає назву групи або порожній рядок, якщо група відсутня."""
+        return self.group_name or ""
 
     @група.setter
     def група(self, value: str) -> None:
-        """Ігнорує встановлення групи, оскільки поле не зберігається."""
-        pass
+        """Зберігає назву групи у полі `group_name`. Якщо None — ставить None."""
+        self.group_name = value if value is not None else None
 
     @property
     def відкладено(self) -> int:
